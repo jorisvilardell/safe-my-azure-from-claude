@@ -21,8 +21,8 @@ jobs:
       matrix:
         node: [24, 26]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -34,7 +34,7 @@ jobs:
       - run: npm run build
       - name: Upload coverage
         if: matrix.node == 24
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage/
@@ -44,7 +44,7 @@ jobs:
     name: No real Azure identifiers committed
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Reject non-fake GUIDs and JWTs
         run: |
           # Fake GUIDs must start with 00000000- or be the documented test GUID (AGENTS.md R7).
@@ -57,9 +57,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: check
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: false
