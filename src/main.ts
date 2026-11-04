@@ -6,12 +6,11 @@ import {
   createAzureAccess,
   createClientFactory,
   createContextStore,
+  createCredentialManager,
   createResourceGraph,
   createResourceResolver,
-  type CredentialProvider,
 } from './core/azure/index.js';
-import { loadContexts, loadEnv } from './core/config/index.js';
-import { AppError } from './core/errors/index.js';
+import { loadContexts, loadEnv, loginPageUrl } from './core/config/index.js';
 import { createLogger } from './core/logging/index.js';
 
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
@@ -30,16 +29,11 @@ async function main(): Promise<void> {
     for (const [subAlias, subId] of Object.entries(c.subscriptions)) aliases.set(subId, subAlias);
   }
 
-  // Placeholder until device-code login (#2) lands.
-  const credentials: CredentialProvider = {
-    isLoggedIn: () => false,
-    getCredential: (alias) => {
-      throw new AppError('NotLoggedIn', `Context "${alias}" is not logged in. Login is not available yet.`);
-    },
-  };
+  const credentials = createCredentialManager({ contexts: contexts.contexts, logger });
   const store = createContextStore({
     contexts: contexts.contexts,
     isLoggedIn: (alias) => credentials.isLoggedIn(alias),
+    ...(contexts.defaultContext === undefined ? {} : { initialActive: contexts.defaultContext }),
   });
   const session = () => azure.session();
   const resourceGraph = createResourceGraph({ session, clients: createClientFactory() });
@@ -47,14 +41,22 @@ async function main(): Promise<void> {
   const azure = createAzureAccess({ contexts: contexts.contexts, store, credentials, resolver });
 
   const ctx = { pseudonymizer: new Pseudonymizer(aliases), logger, azure };
-  const features = buildFeatures({ version });
+  const features = buildFeatures({ version, logins: credentials, loginUrl: loginPageUrl(env) });
 
   logger.info('starting', {
     version,
     contexts: Object.keys(contexts.contexts).length,
     features: features.length,
   });
-  const server = startHttpServer({ host: env.HOST, port: env.PORT, version, features, ctx, logger });
+  const server = startHttpServer({
+    host: env.HOST,
+    port: env.PORT,
+    version,
+    features,
+    ctx,
+    logger,
+    loginPageState: () => credentials.loginPageState(),
+  });
 
   const shutdown = (): void => {
     logger.info('shutting down');

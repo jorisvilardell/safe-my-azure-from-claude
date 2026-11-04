@@ -39,3 +39,4 @@ export function expectNoLeak(output: unknown): void {
 }
 
 export * from './azure.js';
+export * from './login.js';
