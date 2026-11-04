@@ -11,3 +11,6 @@ config/contexts.yaml
 
 # Claude Code local overrides
 .claude/settings.local.json
+
+# Agent worktrees (Claude Code isolation)
+.claude/worktrees/
