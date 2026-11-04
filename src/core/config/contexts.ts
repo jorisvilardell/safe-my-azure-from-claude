@@ -44,3 +44,16 @@ export async function loadContexts(path: string): Promise<ContextsFile> {
     throw err;
   }
 }
+
+/**
+ * Real tenant/subscription ID → the alias the AI sees instead (`tenant-<context>`, `<subscription alias>`).
+ * Feed it to `createAnonymizer({ aliases })`.
+ */
+export function contextIdAliases(contexts: Readonly<Record<string, AzureContext>>): Map<string, string> {
+  const aliases = new Map<string, string>();
+  for (const [ctxAlias, c] of Object.entries(contexts)) {
+    aliases.set(c.tenantId, `tenant-${ctxAlias}`);
+    for (const [subAlias, subId] of Object.entries(c.subscriptions)) aliases.set(subId, subAlias);
+  }
+  return aliases;
+}

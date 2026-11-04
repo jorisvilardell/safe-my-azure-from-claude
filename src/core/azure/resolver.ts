@@ -24,7 +24,7 @@ const Row = z.object({
 type Row = z.infer<typeof Row>;
 
 export interface ResolverDeps {
-  readonly resourceGraph: ResourceGraph;
+  readonly resourceGraph: Pick<ResourceGraph, 'query'>;
   /** Usually `() => azure.session()`. */
   readonly session: () => AzureSession;
   /** Used to show subscriptions by alias (never by ID) in ambiguity errors. */

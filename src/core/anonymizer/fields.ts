@@ -68,7 +68,14 @@ const IDENTITY_CONTAINER_KEYS = new Set([
 /** Sibling keys that mark the current object as describing a principal. */
 const IDENTITY_MARKER_KEYS = new Set(['principalid', 'principaltype', 'userprincipalname', 'appid']);
 
+/**
+ * Secret-looking keys whose OBJECT value is not a secret. The activity log's `authorization`
+ * is `{ action, scope, evidence }`: the RBAC check behind an operation. It is scrubbed as usual.
+ */
+const NON_SECRET_OBJECT_KEYS = new Set(['authorization']);
+
 export const isSecretKey = (key: string): boolean => SECRET_KEY.test(key);
+export const isNonSecretObjectKey = (nk: string): boolean => NON_SECRET_OBJECT_KEYS.has(nk);
 export const isAppIdKey = (nk: string): boolean => APP_ID_KEYS.has(nk);
 export const isTagsKey = (nk: string): boolean => nk === 'tags';
 /** `osVersion`, `agentVersion`, `typeHandlerVersion`: their dotted values are not IPs. */

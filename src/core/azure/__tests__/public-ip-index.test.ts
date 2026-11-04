@@ -1,4 +1,6 @@
 import { describe, expect, it, vi, type Mock } from 'vitest';
+import { createFakeAzureAccess } from '../../../../test/helpers/index.js';
+import { createAnonymizer } from '../../anonymizer/index.js';
 import { PUBLIC_IP_TTL_MS, createPublicIpIndex, type ResourceGraph } from '../index.js';
 
 function setup(rows: unknown[]): {
@@ -58,5 +60,31 @@ describe('createPublicIpIndex', () => {
     expect(index.lookup('203.0.113.10')).toBeUndefined();
     expect(query).toHaveBeenCalledTimes(1);
     await expect(index.refresh()).rejects.toThrow('boom');
+  });
+});
+
+describe('public IP index wired into the anonymizer (as in main.ts)', () => {
+  it('shows our own public IPs by resource name, per active context, and masks the rest', async () => {
+    const azure = createFakeAzureAccess({
+      resourceGraphRows: ({ subscriptions }) =>
+        subscriptions.includes(azure.session().subscriptionId('prod-app'))
+          ? [{ name: 'pip-web', ipAddress: '203.0.113.10' }]
+          : [],
+    });
+    const index = createPublicIpIndex(azure.resourceGraph, {
+      contextAlias: () => azure.contexts.list().find((c) => c.active)?.alias,
+    });
+    const anonymizer = createAnonymizer({ publicIpIndex: index });
+
+    // First sight starts a background refresh: until it lands, the IP is masked.
+    expect(anonymizer.scrubString('from 203.0.113.10')).toBe('from public-ip-external-001');
+    await index.refresh();
+    expect(anonymizer.scrubString('from 203.0.113.10 and 198.51.100.7')).toBe(
+      'from public-ip-pip-web and public-ip-external-002',
+    );
+    expect(azure.resourceGraphQueries[0]?.query).toMatch(/publicipaddresses/);
+
+    azure.contexts.use('lab');
+    expect(anonymizer.scrubString('from 203.0.113.10')).toBe('from public-ip-external-001');
   });
 });

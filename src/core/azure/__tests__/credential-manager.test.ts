@@ -15,7 +15,7 @@ function setup(now?: () => number) {
   const logs: string[] = [];
   const manager = createCredentialManager({
     contexts: FAKE_CONTEXTS,
-    logger: createLogger('debug', (line) => logs.push(line)),
+    logger: createLogger('debug', { write: (line) => logs.push(line) }),
     factory: stub.factory,
     ...(now === undefined ? {} : { now }),
   });

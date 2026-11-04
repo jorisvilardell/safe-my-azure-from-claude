@@ -1,6 +1,7 @@
 import {
   isAppIdKey,
   isIdentityContext,
+  isNonSecretObjectKey,
   isSecretKey,
   isTagsKey,
   isUserKey,
@@ -148,6 +149,20 @@ function walk(value: unknown, p: Pseudonymizer, r: Resolved, key: string | undef
   return value;
 }
 
+/** Everything under a secret key: keeps the shape (keys are still scrubbed), redacts every value. */
+function redactLeaves(value: unknown, p: Pseudonymizer, r: Resolved): unknown {
+  if (Array.isArray(value)) return value.map((v) => redactLeaves(v, p, r));
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(
+        ([k, v]) => [scrubText(k, p, r, DEFAULT_MODE), redactLeaves(v, p, r)] as const,
+      ),
+    );
+  }
+  // Booleans and null carry no secret (`enabled: true`) and help the AI read the shape.
+  return typeof value === 'boolean' || value === null ? value : REDACTED;
+}
+
 /** Applies the field-name rules (fields.ts) to the value of key `rawKey`. */
 function field(rawKey: string, value: unknown, p: Pseudonymizer, r: Resolved, inIdentity: boolean): unknown {
   // Arrays inherit their key's rules: `owners: ['Jane Doe']`, `secrets: ['…']`.
@@ -155,7 +170,11 @@ function field(rawKey: string, value: unknown, p: Pseudonymizer, r: Resolved, in
 
   const nk = normalizeKey(rawKey);
 
-  if (isSecretKey(rawKey) && (typeof value === 'string' || typeof value === 'number')) return REDACTED;
+  if (isSecretKey(rawKey)) {
+    if (typeof value === 'string' || typeof value === 'number') return REDACTED;
+    // `secrets: [{ name, value }]`, `credentials: { value }`: the leaves are the secret, whatever their key.
+    if (isPlainObject(value) && !isNonSecretObjectKey(nk)) return redactLeaves(value, p, r);
+  }
 
   if (isTagsKey(nk) && isPlainObject(value)) {
     return Object.fromEntries(
@@ -177,7 +196,8 @@ function field(rawKey: string, value: unknown, p: Pseudonymizer, r: Resolved, in
  * guarantees G1/G2 (AGENTS.md). Object KEYS are scrubbed too (tags, dynamic maps).
  *
  * On top of the string patterns, field names drive extra rules (see fields.ts):
- * - secret-looking keys (`password`, `clientSecret`, `x-ms-token-*`, …) → `[REDACTED]`;
+ * - secret-looking keys (`password`, `clientSecret`, `x-ms-token-*`, …) → `[REDACTED]`, including
+ *   every value nested in an array or object under them (`secrets: [{ name, value }]`);
  * - objects under a `tags` key → values `[masked]` unless the key is in `options.safeTagKeys`;
  * - `appId`/`clientId`/… → `app-NNN`; `caller`/`userPrincipalName`/… (and `displayName`/`name`
  *   inside an identity object) → `user-NNN`, or `app-NNN` when the value is a bare GUID;

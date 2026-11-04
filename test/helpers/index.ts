@@ -1,14 +1,19 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { Pseudonymizer } from '../../src/core/anonymizer/index.js';
+import { createAnonymizer } from '../../src/core/anonymizer/index.js';
+import { contextIdAliases } from '../../src/core/config/index.js';
 import { createLogger } from '../../src/core/logging/index.js';
-import { createFakeAzureAccess } from './azure.js';
+import { createFakeAzureAccess, FAKE_CONTEXTS } from './azure.js';
 import { assertNoLeakWith } from './leak.js';
 import type { ToolContext } from '../../src/core/mcp/index.js';
 
+/**
+ * A `ToolContext` wired like main.ts: a fake Azure (`createFakeAzureAccess`) and an anonymizer
+ * that shows the fake contexts' tenants and subscriptions by alias. Override any part.
+ */
 export function createTestToolContext(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
-    pseudonymizer: new Pseudonymizer(),
-    logger: createLogger('error', () => undefined),
+    anonymizer: createAnonymizer({ aliases: contextIdAliases(FAKE_CONTEXTS) }),
+    logger: createLogger('error', { write: () => undefined }),
     azure: createFakeAzureAccess(),
     ...overrides,
   };

@@ -16,7 +16,7 @@ export interface ResourceGraphQueryClient {
     query: string;
     subscriptions?: string[];
     options?: { skipToken?: string; top?: number; resultFormat?: 'objectArray' };
-  }): Promise<{ data: unknown; skipToken?: string }>;
+  }): Promise<{ data: unknown; skipToken?: string; resultTruncated?: 'true' | 'false' }>;
 }
 
 export interface ResourceQueryOptions {
@@ -26,9 +26,17 @@ export interface ResourceQueryOptions {
   readonly maxRows?: number;
 }
 
+export interface ResourceQueryResult<T> {
+  readonly rows: T[];
+  /** True when more rows matched than were returned (row cap hit, or Azure truncated the result). */
+  readonly truncated: boolean;
+}
+
 export interface ResourceGraph {
   /** Runs a read-only Resource Graph query, scoped to the active context's subscriptions by default. */
   query<T>(kql: string, opts?: ResourceQueryOptions): Promise<T[]>;
+  /** Same as `query()`, and also says whether rows were cut off, so a tool can tell the AI. */
+  queryResult<T>(kql: string, opts?: ResourceQueryOptions): Promise<ResourceQueryResult<T>>;
 }
 
 export interface ResourceGraphDeps {
@@ -38,7 +46,8 @@ export interface ResourceGraphDeps {
   readonly createClient?: (credential: TokenCredential) => ResourceGraphQueryClient;
 }
 
-const CLIENT_KEY = 'resource-graph';
+/** `ClientFactory` key of the Resource Graph client. Fakes register their stub under it. */
+export const RESOURCE_GRAPH_CLIENT_KEY = 'resource-graph';
 
 // eslint-disable-next-line no-control-regex -- control characters are exactly what we reject.
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
@@ -59,41 +68,54 @@ export function createResourceGraph(deps: ResourceGraphDeps): ResourceGraph {
   const createClient =
     deps.createClient ?? ((credential: TokenCredential) => new ResourceGraphClient(credential));
 
-  return {
-    async query<T>(kql: string, opts: ResourceQueryOptions = {}): Promise<T[]> {
-      const session = deps.session();
-      const allowed = session.subscriptionIds();
-      const subscriptions = opts.subscriptions ?? allowed;
-      // Never query outside the declared subscriptions: an empty list would mean "whole tenant".
-      if (subscriptions.some((s) => !allowed.includes(s))) {
-        throw new AppError(
-          'UnknownSubscription',
-          'The query targets a subscription outside the active context.',
-        );
+  const queryResult = async <T>(
+    kql: string,
+    opts: ResourceQueryOptions = {},
+  ): Promise<ResourceQueryResult<T>> => {
+    const session = deps.session();
+    const allowed = session.subscriptionIds();
+    const subscriptions = opts.subscriptions ?? allowed;
+    // Never query outside the declared subscriptions: an empty list would mean "whole tenant".
+    if (subscriptions.some((s) => !allowed.includes(s))) {
+      throw new AppError(
+        'UnknownSubscription',
+        'The query targets a subscription outside the active context.',
+      );
+    }
+    if (subscriptions.length === 0) return { rows: [], truncated: false };
+
+    const maxRows = Math.max(1, Math.min(Math.floor(opts.maxRows ?? DEFAULT_MAX_ROWS), HARD_MAX_ROWS));
+    const client = deps.clients.getClient(session, RESOURCE_GRAPH_CLIENT_KEY, createClient);
+    const rows: T[] = [];
+    let skipToken: string | undefined;
+    let truncated = false;
+
+    do {
+      const top = Math.min(PAGE_SIZE, maxRows - rows.length);
+      const page = await client.resources({
+        query: kql,
+        subscriptions: [...subscriptions],
+        options: { top, resultFormat: 'objectArray', ...(skipToken === undefined ? {} : { skipToken }) },
+      });
+      if (!Array.isArray(page.data)) {
+        throw new AppError('UnexpectedResponse', 'Resource Graph returned an unexpected response.');
       }
-      if (subscriptions.length === 0) return [];
+      // Rows are untyped JSON from Azure; callers map them through an allowlist.
+      const data = page.data as T[];
+      const room = maxRows - rows.length;
+      rows.push(...data.slice(0, room));
+      if (data.length > room || page.resultTruncated === 'true') truncated = true;
+      skipToken = page.skipToken === '' ? undefined : page.skipToken;
+    } while (skipToken !== undefined && rows.length < maxRows);
 
-      const maxRows = Math.max(1, Math.min(Math.floor(opts.maxRows ?? DEFAULT_MAX_ROWS), HARD_MAX_ROWS));
-      const client = deps.clients.getClient(session, CLIENT_KEY, createClient);
-      const rows: T[] = [];
-      let skipToken: string | undefined;
+    // A skip token left over means Azure had more rows than the cap let us fetch.
+    return { rows, truncated: truncated || skipToken !== undefined };
+  };
 
-      do {
-        const top = Math.min(PAGE_SIZE, maxRows - rows.length);
-        const page = await client.resources({
-          query: kql,
-          subscriptions: [...subscriptions],
-          options: { top, resultFormat: 'objectArray', ...(skipToken === undefined ? {} : { skipToken }) },
-        });
-        if (!Array.isArray(page.data)) {
-          throw new AppError('UnexpectedResponse', 'Resource Graph returned an unexpected response.');
-        }
-        // Rows are untyped JSON from Azure; callers map them through an allowlist.
-        rows.push(...(page.data as T[]).slice(0, maxRows - rows.length));
-        skipToken = page.skipToken === '' ? undefined : page.skipToken;
-      } while (skipToken !== undefined && rows.length < maxRows);
-
-      return rows;
+  return {
+    queryResult,
+    async query<T>(kql: string, opts?: ResourceQueryOptions): Promise<T[]> {
+      return (await queryResult<T>(kql, opts)).rows;
     },
   };
 }

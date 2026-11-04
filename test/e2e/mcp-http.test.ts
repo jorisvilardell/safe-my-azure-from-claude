@@ -37,7 +37,7 @@ const azure = createFakeAzureAccess();
 const logLines: string[] = [];
 const ctx = createTestToolContext({
   azure,
-  logger: createLogger('debug', (line) => logLines.push(line)),
+  logger: createLogger('debug', { write: (line) => logLines.push(line) }),
 });
 
 let server: Server;
