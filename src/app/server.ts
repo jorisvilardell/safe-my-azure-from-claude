@@ -2,8 +2,11 @@ import type { Server } from 'node:http';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { Express } from 'express';
+import type { LoginPageState } from '../core/azure/index.js';
 import type { Logger } from '../core/logging/index.js';
 import { registerFeatures, type Feature, type ToolContext } from '../core/mcp/index.js';
+import { LOGIN_PAGE_HEADERS, renderLoginPage } from './login-page.js';
 
 export interface HttpServerOptions {
   readonly host: string;
@@ -12,6 +15,8 @@ export interface HttpServerOptions {
   readonly features: readonly Feature[];
   readonly ctx: ToolContext;
   readonly logger: Logger;
+  /** Pending device-code logins for the /login page. Server-side only. */
+  readonly loginPageState: () => LoginPageState;
 }
 
 export function createMcpServer(opts: Pick<HttpServerOptions, 'version' | 'features' | 'ctx'>): McpServer {
@@ -23,9 +28,10 @@ export function createMcpServer(opts: Pick<HttpServerOptions, 'version' | 'featu
 /**
  * Streamable HTTP, stateless mode (one MCP server + transport per request).
  * Host-header validation protects against DNS rebinding; the port is only
- * published on 127.0.0.1 by docker-compose.
+ * published on 127.0.0.1 by docker-compose. The validation middleware is
+ * app-wide, so it covers /login as well as /mcp.
  */
-export function startHttpServer(opts: HttpServerOptions): Server {
+export function createHttpApp(opts: Omit<HttpServerOptions, 'port'>): Express {
   const app = createMcpExpressApp({ host: opts.host, allowedHosts: ['localhost', '127.0.0.1', '[::1]'] });
 
   app.post('/mcp', async (req, res) => {
@@ -63,7 +69,16 @@ export function startHttpServer(opts: HttpServerOptions): Server {
     res.json({ status: 'ok' });
   });
 
-  return app.listen(opts.port, opts.host, () => {
+  // Human-only page showing device codes. Never reachable through an MCP tool (AGENTS.md G1).
+  app.get('/login', (_req, res) => {
+    res.set(LOGIN_PAGE_HEADERS).send(renderLoginPage(opts.loginPageState()));
+  });
+
+  return app;
+}
+
+export function startHttpServer(opts: HttpServerOptions): Server {
+  return createHttpApp(opts).listen(opts.port, opts.host, () => {
     opts.logger.info('server listening', { host: opts.host, port: opts.port });
   });
 }

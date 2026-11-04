@@ -11,6 +11,9 @@ contexts:
     subscriptions:
       lab: 00000000-0000-0000-0000-000000000003
 
+# Optional: the context active at startup. Must be one of the aliases above.
+defaultContext: prod
+
 # Tag keys whose values may be shown to the AI. All other tag values are masked.
 safeTagKeys:
   - env

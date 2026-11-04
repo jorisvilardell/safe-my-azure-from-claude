@@ -27,3 +27,19 @@ export {
   type PublicIpIndexOptions,
   type PublicIpLookup,
 } from './public-ip-index.js';
+export {
+  ARM_SCOPE,
+  createCredentialManager,
+  createDeviceCodeCredential,
+  type CredentialFactory,
+  type CredentialFactoryOptions,
+  type CredentialManager,
+  type CredentialManagerDeps,
+  type LoginController,
+  type LoginCredential,
+  type LoginPageState,
+  type LoginState,
+  type LoginStatus,
+  type PendingLogin,
+  type StartLoginResult,
+} from './credential-manager.js';

@@ -1,4 +1,4 @@
-export { loadEnv, type Env } from './env.js';
+export { loadEnv, loginPageUrl, type Env } from './env.js';
 export {
   loadContexts,
   parseContexts,
