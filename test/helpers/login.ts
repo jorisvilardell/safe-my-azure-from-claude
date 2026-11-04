@@ -1,5 +1,5 @@
 import type { AccessToken, GetTokenOptions } from '@azure/core-auth';
-import { Pseudonymizer } from '../../src/core/anonymizer/index.js';
+import { createAnonymizer } from '../../src/core/anonymizer/index.js';
 import {
   createAzureAccess,
   createContextStore,
@@ -8,12 +8,11 @@ import {
   type CredentialFactory,
   type CredentialManager,
   type LoginCredential,
-  type ResourceResolver,
 } from '../../src/core/azure/index.js';
-import { AppError } from '../../src/core/errors/index.js';
+import { contextIdAliases } from '../../src/core/config/index.js';
 import { createLogger } from '../../src/core/logging/index.js';
 import type { ToolContext } from '../../src/core/mcp/index.js';
-import { FAKE_ACCESS_TOKEN, FAKE_CONTEXTS } from './azure.js';
+import { createFakeClientFactory, FAKE_ACCESS_TOKEN, FAKE_CONTEXTS } from './azure.js';
 
 /** Device-code-shaped but fake. Tests assert it never reaches a tool result or a log. */
 export const FAKE_USER_CODE = 'FAKEUC7Q2';
@@ -117,18 +116,25 @@ export interface LoginRig {
 export function createLoginRig(opts: StubLoginOptions & { readonly initialActive?: string } = {}): LoginRig {
   const stub = createStubLogin(opts);
   const logs: string[] = [];
-  const logger = createLogger('debug', (line) => logs.push(line));
+  const aliases = contextIdAliases(FAKE_CONTEXTS);
+  const logger = createLogger('debug', {
+    anonymizer: createAnonymizer({ aliases }),
+    write: (line) => logs.push(line),
+  });
   const manager = createCredentialManager({ contexts: FAKE_CONTEXTS, logger, factory: stub.factory });
   const store = createContextStore({
     contexts: FAKE_CONTEXTS,
     isLoggedIn: (alias) => manager.isLoggedIn(alias),
     initialActive: opts.initialActive ?? 'prod',
   });
-  const resolver: ResourceResolver = {
-    resolve: () => Promise.reject(new AppError('NotImplemented', 'not used')),
-  };
-  const azure = createAzureAccess({ contexts: FAKE_CONTEXTS, store, credentials: manager, resolver });
-  const ctx: ToolContext = { pseudonymizer: new Pseudonymizer(), logger, azure };
+  // Fake clients: the contexts tools never call Azure, and nothing here may reach the network.
+  const azure = createAzureAccess({
+    contexts: FAKE_CONTEXTS,
+    store,
+    credentials: manager,
+    clients: createFakeClientFactory(),
+  });
+  const ctx: ToolContext = { anonymizer: createAnonymizer({ aliases }), logger, azure };
   return { stub, manager, azure, ctx, logs };
 }
 

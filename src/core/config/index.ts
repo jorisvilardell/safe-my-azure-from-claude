@@ -1,5 +1,6 @@
 export { loadEnv, loginPageUrl, type Env } from './env.js';
 export {
+  contextIdAliases,
   loadContexts,
   parseContexts,
   ContextsFileSchema,

@@ -11,8 +11,9 @@ import {
 } from '../index.js';
 
 type Request = Parameters<ResourceGraphQueryClient['resources']>[0];
+type Page = Awaited<ReturnType<ResourceGraphQueryClient['resources']>>;
 
-function stubClient(pages: readonly { data: unknown; skipToken?: string }[]): {
+function stubClient(pages: readonly Page[]): {
   client: ResourceGraphQueryClient;
   requests: Request[];
 } {
@@ -123,6 +124,63 @@ describe('createResourceGraph', () => {
     });
     await expect(rg.query('resources')).rejects.toMatchObject({ code: 'NotLoggedIn' });
     expect(createClient).not.toHaveBeenCalled();
+  });
+});
+
+describe('resourceGraph.queryResult', () => {
+  const azure = createFakeAzureAccess();
+  const build = (pages: readonly Page[]): ReturnType<typeof createResourceGraph> =>
+    createResourceGraph({
+      session: () => azure.session(),
+      clients: createClientFactory(),
+      createClient: () => stubClient(pages).client,
+    });
+
+  it('is not truncated when every row fits', async () => {
+    const rg = build([{ data: rows(0, 2), skipToken: 't1' }, { data: rows(2, 1) }]);
+    await expect(rg.queryResult('resources')).resolves.toEqual({ rows: rows(0, 3), truncated: false });
+  });
+
+  it('is not truncated when the last page exactly fills the cap', async () => {
+    const rg = build([{ data: rows(0, 3) }]);
+    await expect(rg.queryResult('resources', { maxRows: 3 })).resolves.toEqual({
+      rows: rows(0, 3),
+      truncated: false,
+    });
+  });
+
+  it('is truncated when the row cap stops paging', async () => {
+    const rg = build([{ data: rows(0, 3), skipToken: 'more' }]);
+    await expect(rg.queryResult('resources', { maxRows: 3 })).resolves.toEqual({
+      rows: rows(0, 3),
+      truncated: true,
+    });
+  });
+
+  it('is truncated when a page holds more rows than the cap', async () => {
+    const rg = build([{ data: rows(0, 5) }]);
+    await expect(rg.queryResult('resources', { maxRows: 2 })).resolves.toEqual({
+      rows: rows(0, 2),
+      truncated: true,
+    });
+  });
+
+  it('is truncated when Azure says so', async () => {
+    const rg = build([{ data: rows(0, 1), resultTruncated: 'true' }]);
+    await expect(rg.queryResult('resources')).resolves.toEqual({ rows: rows(0, 1), truncated: true });
+  });
+
+  it('is empty and not truncated for a context without subscriptions', async () => {
+    const empty = createFakeAzureAccess({
+      contexts: { solo: { tenantId: '00000000-0000-0000-0000-0000000000cc', subscriptions: {} } },
+    });
+    const rg = createResourceGraph({ session: () => empty.session(), clients: createClientFactory() });
+    await expect(rg.queryResult('resources')).resolves.toEqual({ rows: [], truncated: false });
+  });
+
+  it('query() returns the same rows', async () => {
+    const rg = build([{ data: rows(0, 3), skipToken: 'more' }]);
+    await expect(rg.query('resources', { maxRows: 3 })).resolves.toEqual(rows(0, 3));
   });
 });
 

@@ -5,14 +5,18 @@ import {
   FAKE_CONTEXTS,
   FAKE_USER_CODE,
   FAKE_VERIFICATION_URI,
+  createFakeAzureAccess,
   createLoginRig,
+  createTestToolContext,
   expectNoLeak,
   flushLogin,
   parseToolText,
   toolText,
   type LoginRig,
 } from '../../../../test/helpers/index.js';
-import { createAzureAccess, createContextStore } from '../../../core/azure/index.js';
+import { createAnonymizer } from '../../../core/anonymizer/index.js';
+import { createAzureAccess, createContextStore, createPublicIpIndex } from '../../../core/azure/index.js';
+import { contextIdAliases } from '../../../core/config/index.js';
 import { executeTool, type ToolDefinition } from '../../../core/mcp/index.js';
 import { createContextsFeature } from '../index.js';
 
@@ -51,6 +55,26 @@ describe('contexts feature', () => {
       'login_status',
       'logout',
     ]);
+  });
+
+  it('keeps the loopback login URL intact through executeTool (scrubber regression)', async () => {
+    const rig = createLoginRig();
+    const feature = createContextsFeature({ logins: rig.manager, loginUrl: LOGIN_URL });
+    const tool = feature.tools.find((t) => t.name === 'login');
+    if (tool === undefined) throw new Error('missing tool');
+    // Anonymizer wired like main.ts: aliases, and a public IP index over Resource Graph.
+    const azure = createFakeAzureAccess({
+      resourceGraphRows: [{ name: 'pip-web', ipAddress: '203.0.113.10' }],
+    });
+    const publicIpIndex = createPublicIpIndex(azure.resourceGraph, { contextAlias: () => 'prod' });
+    await publicIpIndex.refresh();
+    const ctx = createTestToolContext({
+      anonymizer: createAnonymizer({ aliases: contextIdAliases(FAKE_CONTEXTS), publicIpIndex }),
+    });
+
+    const result = await executeTool(tool, {}, ctx);
+    expect(toolText(result)).toContain('http://127.0.0.1:8765/login');
+    expect(parseToolText(result)).toEqual({ message: `Open ${LOGIN_URL} to sign in to context 'prod'.` });
   });
 
   it('lists contexts by alias only', async () => {
@@ -153,7 +177,7 @@ describe('contexts feature', () => {
       contexts: FAKE_CONTEXTS,
       store,
       credentials: rig.manager,
-      resolver: rig.azure.resolver,
+      clients: rig.azure.clients,
     });
     const feature = createContextsFeature({ logins: rig.manager, loginUrl: LOGIN_URL });
     const tool = feature.tools.find((t) => t.name === 'login');

@@ -15,10 +15,12 @@ export {
   kqlString,
   DEFAULT_MAX_ROWS,
   HARD_MAX_ROWS,
+  RESOURCE_GRAPH_CLIENT_KEY,
   type ResourceGraph,
   type ResourceGraphDeps,
   type ResourceGraphQueryClient,
   type ResourceQueryOptions,
+  type ResourceQueryResult,
 } from './resource-graph.js';
 export { createResourceResolver, RESOLVER_TTL_MS, type ResolverDeps } from './resolver.js';
 export {

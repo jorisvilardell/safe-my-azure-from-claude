@@ -120,6 +120,33 @@ describe('JSON secret fields', () => {
     });
   });
 
+  it('redacts every value nested in arrays or objects under a secret key', () => {
+    const out = scrub(
+      {
+        secrets: [
+          { name: 'db-password', value: SECRET },
+          { name: 'api', value: 12345, enabled: true, expires: null },
+        ],
+        credentials: { value: SECRET, nested: { deeper: [SECRET, { v: SECRET }] } },
+        clientSecret: { secretText: SECRET, hint: 'c2V' },
+        storageAccountKeys: [[SECRET], { primary: SECRET }],
+        properties: { siteConfig: { secrets: [{ key: 'X', value: SECRET }] } },
+      },
+      new Pseudonymizer(),
+    );
+    expect(out).toEqual({
+      secrets: [
+        { name: REDACTED, value: REDACTED },
+        { name: REDACTED, value: REDACTED, enabled: true, expires: null },
+      ],
+      credentials: { value: REDACTED, nested: { deeper: [REDACTED, { v: REDACTED }] } },
+      clientSecret: { secretText: REDACTED, hint: REDACTED },
+      storageAccountKeys: [[REDACTED], { primary: REDACTED }],
+      properties: { siteConfig: { secrets: [{ key: REDACTED, value: REDACTED }] } },
+    });
+    expect(JSON.stringify(out)).not.toContain(SECRET);
+  });
+
   it('redacts more key=value secrets', () => {
     expect(s(`Server=sql01;User ID=app;Password=${SECRET};`)).toBe(
       `Server=sql01;User ID=app;Password=${REDACTED};`,

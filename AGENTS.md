@@ -35,10 +35,12 @@ src/
 │  └─ server.ts               # MCP server + HTTP transport
 ├─ core/                      # Cross-cutting, feature-agnostic building blocks
 │  ├─ anonymizer/             # scrub() — the single choke point for G1/G2
+│  ├─ azure/                  # AzureAccess: contexts, sessions, Resource Graph, SDK client cache, resolver
 │  ├─ config/                 # Env + contexts.yaml loading (zod-validated)
 │  ├─ errors/                 # AppError + sanitizeError()
-│  ├─ logging/                # Scrubbing logger (stderr only)
-│  └─ mcp/                    # defineTool(), Feature contract, registry
+│  ├─ logging/                # Scrubbing logger (stderr only); Azure SDK logging forced off
+│  ├─ mcp/                    # defineTool(), ToolContext, Feature contract, registry
+│  └─ safety/                 # KQL guard (management commands, timespan and row caps)
 └─ features/
    └─ <feature>/
       ├─ index.ts             # Public API: exports the Feature object ONLY
@@ -67,9 +69,47 @@ Planned features: `system` (exists, the reference example), `contexts` (login an
    `defineTool` is what forces the `shape → scrub → sanitizeError` pipeline.
 3. The mapper uses an **allowlist**: copy only the fields you need, and never spread a raw SDK object (`...raw`).
 4. Inputs take **names or aliases** (`resourceGroup`, `name`, `subscription` alias), never raw IDs. Resolve them to IDs inside the service.
-5. Write tests in `__tests__/` with realistic, FAKE payloads that contain GUIDs, ARM IDs, emails, JWTs, and public IPs. Assert that none of them appear in the tool output (`expectNoLeak()` from `test/helpers`).
-6. Register the feature in `src/app/features.ts`.
-7. Run `npm run check` (lint + typecheck + test + build). It must pass.
+5. Get Azure access **only** through the handler's `ctx` (`ToolContext`). Never build a credential, and never `new` an SDK client outside `ctx.azure.clients`:
+   - `ctx.azure.session()`: the active context's `credential` and real subscription IDs (`subscriptionId(alias)`, `subscriptionIds()`). Throws `NoActiveContext` / `NotLoggedIn` (already AI-friendly `AppError`s).
+   - `ctx.azure.resourceGraph.query(kql, { subscriptions?, maxRows? })` → rows; `.queryResult(...)` → `{ rows, truncated }`. Pass `truncated` on to the AI. Put AI input into KQL with `kqlString()` only.
+   - `ctx.azure.clients.getClient(session, key, (credential) => new SomeClient(credential, …))`: the shared per-context client cache. The key must identify everything the client is bound to (e.g. `alerts:<subscriptionId>`).
+   - `ctx.azure.resolver.resolve({ name, resourceGroup?, subscription?, type? })` → ARM ID, for name-based inputs.
+   - `ctx.anonymizer`: `executeTool` scrubs every result with it, so don't scrub by hand. Use `ctx.anonymizer.pseudonymizer.resolve(pseudonym)` to turn a pseudonym the AI sent back (e.g. an alert ref) into the real value. For tags, return them under a `tags` key (masked automatically) or call `maskTags()` from `core/anonymizer`.
+6. Write tests in `__tests__/` with realistic, FAKE payloads that contain GUIDs, ARM IDs, emails, JWTs, and public IPs. Run tools through `executeTool(tool, args, createTestToolContext({ azure }))` and assert that none of them appear in the output (`expectNoLeak()` from `test/helpers`). Stub Azure with `createFakeAzureAccess()`: `resourceGraphRows` / `setResourceGraphRows()` for Resource Graph, `stubClient(key, fake)` for any other SDK client (an unstubbed key throws, so tests never reach the network).
+7. Register the feature in `src/app/features.ts`.
+8. Run `npm run check` (lint + typecheck + test + build). It must pass.
+
+```ts
+// <feature>.service.ts
+export async function listVms(azure: AzureAccess, input: { subscription?: string; resourceGroup?: string }) {
+  const session = azure.session();
+  const subscriptions =
+    input.subscription === undefined ? undefined : [session.subscriptionId(input.subscription)];
+  const filter =
+    input.resourceGroup === undefined ? '' : `| where resourceGroup =~ ${kqlString(input.resourceGroup)}`;
+  const { rows, truncated } = await azure.resourceGraph.queryResult<unknown>(
+    `resources | where type =~ 'microsoft.compute/virtualmachines' ${filter} | project id, name, location, tags`,
+    { maxRows: 200, ...(subscriptions === undefined ? {} : { subscriptions }) },
+  );
+  return { vms: rows.map(toVmDto), truncated }; // toVmDto: allowlist mapper (rule 3)
+}
+
+// <feature>.tools.ts
+defineTool({
+  name: 'list_vms',
+  title: 'List VMs',
+  description: '…',
+  inputSchema: ListVmsInput,
+  handler: (args, ctx) => listVms(ctx.azure, args),
+});
+
+// __tests__/<feature>.test.ts
+const azure = createFakeAzureAccess({
+  resourceGraphRows: [{ id: FAKE_VM_ID, name: 'vm-web-01', location: 'westeurope' }],
+});
+const result = await executeTool(tool, {}, createTestToolContext({ azure }));
+expectNoLeak(toolText(result));
+```
 
 ## 3. Security rules (non-negotiable)
 

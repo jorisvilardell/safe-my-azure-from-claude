@@ -1,4 +1,6 @@
 import type { TokenCredential } from '@azure/core-auth';
+import type { ClientFactory } from './client-factory.js';
+import type { ResourceGraph } from './resource-graph.js';
 
 /**
  * What the AI may learn about a context: aliases and flags only.
@@ -59,10 +61,19 @@ export interface ResourceResolver {
   resolve(ref: ResourceRef): Promise<string>;
 }
 
-/** The single Azure entry point handed to tools through `ToolContext.azure`. */
+/**
+ * The single Azure entry point handed to tools through `ToolContext.azure`.
+ * One instance per server: every feature shares its Resource Graph client, SDK client cache
+ * and resolver. Server-side only: never return any of it from a tool.
+ */
 export interface AzureAccess {
   readonly contexts: ContextStore;
   /** Throws `AppError('NoActiveContext')` or `AppError('NotLoggedIn')`. */
   session(): AzureSession;
+  /** Resource name → ARM ID, within the active context. */
   readonly resolver: ResourceResolver;
+  /** Read-only Resource Graph queries, scoped to the active context's subscriptions. */
+  readonly resourceGraph: ResourceGraph;
+  /** Per-context cache of Azure SDK clients. Build every SDK client through it. */
+  readonly clients: ClientFactory;
 }
