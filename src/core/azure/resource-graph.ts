@@ -64,15 +64,34 @@ export function kqlString(value: string): string {
   return `'${value.replace(/[\\'"]/g, (c) => `\\${c}`)}'`;
 }
 
-export function createResourceGraph(deps: ResourceGraphDeps): ResourceGraph {
+export interface ResourceScanOptions {
+  /** Row cap, NOT clamped to `HARD_MAX_ROWS`: the caller enforces its own bound. */
+  readonly maxRows: number;
+  readonly subscriptions?: readonly string[];
+}
+
+/**
+ * Server-internal bulk read for the inventory index: same scoping and paging as `queryResult()`,
+ * for an explicit session and without the `HARD_MAX_ROWS` clamp. Deliberately not part of
+ * `ResourceGraph`, so features cannot pull unbounded result sets.
+ */
+export type ResourceGraphScan = <T>(
+  session: AzureSession,
+  kql: string,
+  opts: ResourceScanOptions,
+) => Promise<ResourceQueryResult<T>>;
+
+export function createResourceGraphScan(
+  deps: Pick<ResourceGraphDeps, 'clients' | 'createClient'>,
+): ResourceGraphScan {
   const createClient =
     deps.createClient ?? ((credential: TokenCredential) => new ResourceGraphClient(credential));
 
-  const queryResult = async <T>(
+  return async <T>(
+    session: AzureSession,
     kql: string,
-    opts: ResourceQueryOptions = {},
+    opts: ResourceScanOptions,
   ): Promise<ResourceQueryResult<T>> => {
-    const session = deps.session();
     const allowed = session.subscriptionIds();
     const subscriptions = opts.subscriptions ?? allowed;
     // Never query outside the declared subscriptions: an empty list would mean "whole tenant".
@@ -84,7 +103,7 @@ export function createResourceGraph(deps: ResourceGraphDeps): ResourceGraph {
     }
     if (subscriptions.length === 0) return { rows: [], truncated: false };
 
-    const maxRows = Math.max(1, Math.min(Math.floor(opts.maxRows ?? DEFAULT_MAX_ROWS), HARD_MAX_ROWS));
+    const maxRows = Math.max(1, Math.floor(opts.maxRows));
     const client = deps.clients.getClient(session, RESOURCE_GRAPH_CLIENT_KEY, createClient);
     const rows: T[] = [];
     let skipToken: string | undefined;
@@ -110,6 +129,22 @@ export function createResourceGraph(deps: ResourceGraphDeps): ResourceGraph {
 
     // A skip token left over means Azure had more rows than the cap let us fetch.
     return { rows, truncated: truncated || skipToken !== undefined };
+  };
+}
+
+export function createResourceGraph(deps: ResourceGraphDeps): ResourceGraph {
+  const scan = createResourceGraphScan(deps);
+
+  const queryResult = async <T>(
+    kql: string,
+    opts: ResourceQueryOptions = {},
+  ): Promise<ResourceQueryResult<T>> => {
+    const session = deps.session();
+    const maxRows = Math.max(1, Math.min(Math.floor(opts.maxRows ?? DEFAULT_MAX_ROWS), HARD_MAX_ROWS));
+    return scan<T>(session, kql, {
+      maxRows,
+      ...(opts.subscriptions === undefined ? {} : { subscriptions: opts.subscriptions }),
+    });
   };
 
   return {

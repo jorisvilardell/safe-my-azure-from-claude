@@ -7,7 +7,9 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildFeatures } from '../../src/app/features.js';
 import { startHttpServer } from '../../src/app/server.js';
+import { INVENTORY_QUERY } from '../../src/core/azure/index.js';
 import { createLogger } from '../../src/core/logging/index.js';
+import * as v from '../fixtures/azure/values.js';
 import {
   createFakeAzureAccess,
   createLoginRig,
@@ -24,6 +26,47 @@ import {
  */
 
 const VERSION = '0.0.0-test';
+
+const SUB = FAKE_CONTEXTS.prod?.subscriptions['prod-app'] ?? '';
+/** What the inventory index reads: IDs, tenant, tags with emails, public IPs, a GUID in a name. */
+const LEAKY_INVENTORY_ROWS: readonly unknown[] = [
+  {
+    id: `/subscriptions/${SUB}/resourceGroups/rg-app`,
+    name: 'rg-app',
+    type: 'microsoft.resources/subscriptions/resourcegroups',
+    resourceGroup: 'rg-app',
+    subscriptionId: SUB,
+    location: 'westeurope',
+    tags: { owner: v.OWNER_EMAIL },
+  },
+  {
+    id: v.VM_ARM_ID,
+    name: 'vm-web-01',
+    type: 'microsoft.compute/virtualmachines',
+    resourceGroup: 'rg-app',
+    subscriptionId: SUB,
+    tenantId: v.TENANT_ID,
+    location: 'westeurope',
+    tags: { owner: v.OWNER_EMAIL, 'created-by': v.CALLER_EMAIL },
+  },
+  {
+    id: `/subscriptions/${SUB}/resourceGroups/rg-app/providers/Microsoft.Network/publicIPAddresses/pip-web`,
+    name: 'pip-web',
+    type: 'microsoft.network/publicipaddresses',
+    resourceGroup: 'rg-app',
+    subscriptionId: SUB,
+    location: 'westeurope',
+    ipAddress: v.PUBLIC_IP_CLIENT,
+  },
+  {
+    id: `/subscriptions/${SUB}/resourceGroups/rg-app/providers/Microsoft.Network/networkSecurityGroups/nsg-${v.VM_ID}`,
+    name: `nsg-allow-${v.PUBLIC_IP_PEER}-${v.VM_ID}`,
+    type: 'microsoft.network/networksecuritygroups',
+    resourceGroup: 'rg-app',
+    subscriptionId: SUB,
+    location: 'westeurope',
+  },
+];
 // Stubbed device-code login: the contexts tools run for real, without touching Azure.
 const loginRig = createLoginRig();
 const features = buildFeatures({
@@ -33,7 +76,11 @@ const features = buildFeatures({
 });
 const TOOL_NAMES = features.flatMap((f) => f.tools.map((t) => t.name));
 
-const azure = createFakeAzureAccess();
+// The inventory index is on, so the tools also run their "served from memory" path.
+const azure = createFakeAzureAccess({
+  inventory: {},
+  resourceGraphRows: ({ query }) => (query === INVENTORY_QUERY ? LEAKY_INVENTORY_ROWS : []),
+});
 const logLines: string[] = [];
 const ctx = createTestToolContext({
   azure,
@@ -217,6 +264,87 @@ describe('MCP over HTTP: every tool, every state, no leak', () => {
       if (tool === undefined) return;
       await callAndCheck(tool, false);
       await callAndCheck(tool, true);
+    });
+  });
+});
+
+describe('MCP inventory resource', () => {
+  it('is off by default: no resources capability, resources/list is refused', async () => {
+    expect(client.getServerCapabilities()?.resources).toBeUndefined();
+    const err: unknown = await client.listResources().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expectNoLeak(err instanceof Error ? err.message : err);
+  });
+
+  describe('when INVENTORY_RESOURCE=on', () => {
+    let resourceServer: Server;
+    let resourceClient: Client;
+
+    beforeAll(async () => {
+      resourceServer = startHttpServer({
+        host: '127.0.0.1',
+        port: 0,
+        version: VERSION,
+        features,
+        ctx,
+        logger: ctx.logger,
+        inventoryResource: true,
+        loginPageState: () => loginRig.manager.loginPageState(),
+      });
+      if (!resourceServer.listening) await once(resourceServer, 'listening');
+      const { port } = resourceServer.address() as AddressInfo;
+      resourceClient = new Client({ name: 'leak-harness-resources', version: VERSION });
+      await resourceClient.connect(
+        new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)),
+      );
+    });
+
+    afterAll(async () => {
+      await resourceClient.close();
+      resourceServer.closeAllConnections();
+      await new Promise<void>((resolve) =>
+        resourceServer.close(() => {
+          resolve();
+        }),
+      );
+    });
+
+    const URIS = [
+      ...Object.keys(FAKE_CONTEXTS).map((alias) => `azure://inventory/${alias}`),
+      'azure://inventory/nope',
+      `azure://inventory/${SUB}`,
+    ];
+
+    describe.each(STATES)('%s', (state, enter) => {
+      it('resources/list and resources/read never leak', async () => {
+        enter();
+        const listed = await resourceClient.listResources();
+        expectNoLeak(listed);
+        expect(listed.resources.map((r) => r.uri)).toEqual(
+          Object.keys(FAKE_CONTEXTS).map((alias) => `azure://inventory/${alias}`),
+        );
+        expectNoLeak(await resourceClient.listResourceTemplates());
+
+        for (const uri of URIS) {
+          let output: unknown;
+          try {
+            output = await resourceClient.readResource({ uri });
+          } catch (err) {
+            output = err instanceof Error ? err.message : err;
+          }
+          expectNoLeak(output);
+        }
+
+        // Not vacuous: logged in, the active context's names really are listed.
+        const prod = toLeakText(await resourceClient.readResource({ uri: 'azure://inventory/prod' }));
+        if (state === 'logged in') {
+          expect(prod).toContain('rg-app/microsoft.compute/virtualmachines/vm-web-01');
+          expect(prod).toContain('nsg-allow-public-ip-');
+          expect(prod).not.toContain('rg-app/microsoft.resources');
+        } else {
+          expect(prod).toContain('NotLoggedIn');
+        }
+      });
     });
   });
 });

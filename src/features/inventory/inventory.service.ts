@@ -1,4 +1,9 @@
-import { kqlString, type AzureAccess, type AzureSession } from '../../core/azure/index.js';
+import {
+  kqlString,
+  type AzureAccess,
+  type AzureSession,
+  type ResourceQueryResult,
+} from '../../core/azure/index.js';
 import { AppError } from '../../core/errors/index.js';
 import {
   toResourceDetailsDto,
@@ -70,6 +75,24 @@ function scope(session: AzureSession, subscription: string | undefined): { subsc
   return subscription === undefined ? {} : { subscriptions: [session.subscriptionId(subscription)] };
 }
 
+function subscriptionFilter(
+  session: AzureSession,
+  subscription: string | undefined,
+): { subscriptionIds?: string[] } {
+  const { subscriptions } = scope(session, subscription);
+  return subscriptions === undefined ? {} : { subscriptionIds: subscriptions };
+}
+
+/** Like the live `queryResult` row cap: keep `max` rows, and say whether more matched. */
+function capped<T>(rows: readonly T[], max: number): ResourceQueryResult<T> {
+  return { rows: rows.slice(0, max), truncated: rows.length > max };
+}
+
+function compare(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
 /** `Microsoft.Compute/virtualMachines` matches exactly; `virtualMachines` matches the last segment. */
 function typeFilter(type: string): string {
   return type.includes('/') ? `type =~ ${kqlString(type)}` : `type endswith ${kqlString(`/${type}`)}`;
@@ -105,20 +128,36 @@ export async function listResourceGroups(
   input: { readonly subscription?: string | undefined },
 ): Promise<ResourceGroupsResult> {
   const session = deps.azure.session();
-  const { rows, truncated } = await deps.azure.resourceGraph.queryResult<unknown>(
+  const snapshot = deps.azure.inventory.current();
+  const { rows, truncated }: ResourceQueryResult<unknown> = snapshot
+    ? capped(
+        snapshot
+          .find({ table: 'resourceGroups', ...subscriptionFilter(session, input.subscription) })
+          .sort((a, b) => compare(a.subscriptionId, b.subscriptionId) || compare(a.name, b.name)),
+        MAX_RESOURCE_GROUPS,
+      )
+    : await listResourceGroupsLive(deps, session, input.subscription);
+  const md = mapperDeps(deps, session);
+  return {
+    resourceGroups: rows.flatMap((r) => toResourceGroupDto(r, md) ?? []),
+    truncated,
+  };
+}
+
+function listResourceGroupsLive(
+  deps: InventoryDeps,
+  session: AzureSession,
+  subscription: string | undefined,
+): Promise<ResourceQueryResult<unknown>> {
+  return deps.azure.resourceGraph.queryResult<unknown>(
     [
       'resourcecontainers',
       "where type =~ 'microsoft.resources/subscriptions/resourcegroups'",
       'project name, location, tags, subscriptionId, provisioningState = tostring(properties.provisioningState)',
       'order by subscriptionId asc, name asc',
     ].join('\n| '),
-    { maxRows: MAX_RESOURCE_GROUPS, ...scope(session, input.subscription) },
+    { maxRows: MAX_RESOURCE_GROUPS, ...scope(session, subscription) },
   );
-  const md = mapperDeps(deps, session);
-  return {
-    resourceGroups: rows.flatMap((r) => toResourceGroupDto(r, md) ?? []),
-    truncated,
-  };
 }
 
 export function buildSearchQuery(input: SearchInput): string {
@@ -139,10 +178,28 @@ export async function searchResources(deps: InventoryDeps, input: SearchInput): 
   const session = deps.azure.session();
   // No `take` in the KQL: the row cap is applied by queryResult, which then reports `truncated`.
   const limit = Math.max(1, Math.min(Math.floor(input.limit ?? DEFAULT_SEARCH_LIMIT), MAX_SEARCH_LIMIT));
-  const { rows, truncated } = await deps.azure.resourceGraph.queryResult<unknown>(buildSearchQuery(input), {
-    maxRows: limit,
-    ...scope(session, input.subscription),
-  });
+  const snapshot = deps.azure.inventory.current();
+  // Fresh snapshot: same filters and order as buildSearchQuery(), in memory. Otherwise live.
+  const { rows, truncated }: ResourceQueryResult<unknown> = snapshot
+    ? capped(
+        snapshot
+          .find({
+            nameContains: input.name,
+            type: input.type,
+            resourceGroup: input.resourceGroup,
+            location: input.location,
+            ...subscriptionFilter(session, input.subscription),
+          })
+          .sort(
+            (a, b) =>
+              compare(a.resourceGroup, b.resourceGroup) || compare(a.type, b.type) || compare(a.name, b.name),
+          ),
+        limit,
+      )
+    : await deps.azure.resourceGraph.queryResult<unknown>(buildSearchQuery(input), {
+        maxRows: limit,
+        ...scope(session, input.subscription),
+      });
   const md = mapperDeps(deps, session);
   return { resources: rows.flatMap((r) => toResourceDto(r, md) ?? []), truncated };
 }

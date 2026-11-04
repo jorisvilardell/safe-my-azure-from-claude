@@ -64,9 +64,17 @@ describe('contexts feature', () => {
     if (tool === undefined) throw new Error('missing tool');
     // Anonymizer wired like main.ts: aliases, and a public IP index over Resource Graph.
     const azure = createFakeAzureAccess({
-      resourceGraphRows: [{ name: 'pip-web', ipAddress: '203.0.113.10' }],
+      inventory: {},
+      resourceGraphRows: [
+        {
+          id: '/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip-web',
+          name: 'pip-web',
+          type: 'microsoft.network/publicipaddresses',
+          ipAddress: '203.0.113.10',
+        },
+      ],
     });
-    const publicIpIndex = createPublicIpIndex(azure.resourceGraph, { contextAlias: () => 'prod' });
+    const publicIpIndex = createPublicIpIndex(azure.inventory);
     await publicIpIndex.refresh();
     const ctx = createTestToolContext({
       anonymizer: createAnonymizer({ aliases: contextIdAliases(FAKE_CONTEXTS), publicIpIndex }),

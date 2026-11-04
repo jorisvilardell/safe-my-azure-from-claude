@@ -149,4 +149,32 @@ describe('createCredentialManager', () => {
     expect((err as Error).message).not.toContain(FAKE_USER_CODE);
     expect(manager.isLoggedIn('prod')).toBe(false);
   });
+
+  it('tells listeners about login, logout and expired sessions, and survives a failing listener', async () => {
+    const { stub, manager, logs } = setup();
+    const changes: string[] = [];
+    manager.onSessionChange(() => {
+      throw new Error('listener bug');
+    });
+    manager.onSessionChange((alias, change) => changes.push(`${alias}:${change}`));
+
+    manager.startLogin('prod');
+    stub.approve();
+    await flushLogin();
+    expect(manager.isLoggedIn('prod')).toBe(true);
+    manager.logout('prod');
+    manager.logout('prod'); // nothing to log out: no event
+
+    manager.startLogin('lab');
+    stub.approve();
+    await flushLogin();
+    stub.expireSession();
+    const credential = manager.getCredential('lab');
+    await credential.getToken(ARM_SCOPE).catch(() => undefined);
+    await credential.getToken(ARM_SCOPE).catch(() => undefined);
+
+    expect(changes).toEqual(['prod:login', 'prod:logout', 'lab:login', 'lab:logout']);
+    expect(logs.join('\n')).toContain('session listener failed');
+    expect(logs.join('\n')).not.toContain('listener bug');
+  });
 });

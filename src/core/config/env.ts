@@ -8,6 +8,13 @@ const EnvSchema = z.object({
   /** Base URL the user opens in a browser (login page). Defaults to http://127.0.0.1:<PORT>. */
   PUBLIC_URL: z.url({ protocol: /^https?$/ }).optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  /** In-memory inventory index cap, per context. Over it, tools query live. 0 disables the index. */
+  INVENTORY_MAX_RESOURCES: z.coerce.number().int().min(0).max(1_000_000).default(50_000),
+  /**
+   * `on` exposes the MCP resource `azure://inventory/<context>`. Off by default: it sends EVERY
+   * resource name to the AI, where searching on demand reveals only the relevant ones.
+   */
+  INVENTORY_RESOURCE: z.enum(['on', 'off']).default('off'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

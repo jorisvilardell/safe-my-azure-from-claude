@@ -12,6 +12,8 @@ services:
       - ./config/contexts.yaml:/app/config/contexts.yaml:ro
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      INVENTORY_MAX_RESOURCES: ${INVENTORY_MAX_RESOURCES:-50000}
+      INVENTORY_RESOURCE: ${INVENTORY_RESOURCE:-off}
     # Hardening: tokens live in process memory only (AGENTS.md R8).
     read_only: true
     tmpfs:

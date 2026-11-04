@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AppError } from '../errors/index.js';
 import type { AzureSession, ContextStore, ResourceRef, ResourceResolver } from './contracts.js';
+import type { InventoryIndex, InventorySnapshot } from './inventory-index.js';
 import { kqlString, type ResourceGraph } from './resource-graph.js';
 
 export const RESOLVER_TTL_MS = 5 * 60_000;
@@ -29,8 +30,38 @@ export interface ResolverDeps {
   readonly session: () => AzureSession;
   /** Used to show subscriptions by alias (never by ID) in ambiguity errors. */
   readonly contexts: ContextStore;
+  /** When its snapshot is fresh, lookups are served from it instead of Resource Graph. */
+  readonly inventory?: Pick<InventoryIndex, 'current'>;
   readonly ttlMs?: number;
   readonly now?: () => number;
+}
+
+const isResourceGroupType = (type: string | undefined): boolean =>
+  type !== undefined && RESOURCE_GROUP_TYPES.has(type.trim().toLowerCase());
+
+const byLocation = (a: Row, b: Row): number =>
+  compare(a.subscriptionId, b.subscriptionId) ||
+  compare(a.resourceGroup, b.resourceGroup) ||
+  compare(a.name, b.name);
+
+function compare(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+/** The live query's filters and order, over the in-memory snapshot. */
+function fromSnapshot(snapshot: InventorySnapshot, ref: ResourceRef, subscriptions?: string[]): Row[] {
+  const type = ref.type?.trim();
+  return snapshot
+    .find({
+      table: isResourceGroupType(type) ? 'resourceGroups' : 'resources',
+      name: ref.name,
+      type,
+      resourceGroup: ref.resourceGroup,
+      subscriptionIds: subscriptions,
+    })
+    .sort(byLocation)
+    .slice(0, MAX_CANDIDATES + 1);
 }
 
 function buildQuery(ref: ResourceRef): string {
@@ -96,13 +127,22 @@ export function createResourceResolver(deps: ResolverDeps): ResourceResolver {
   return {
     async resolve(ref: ResourceRef): Promise<string> {
       const session = deps.session();
+      const subscriptions =
+        ref.subscription === undefined ? undefined : [session.subscriptionId(ref.subscription)];
+
+      const snapshot = deps.inventory?.current();
+      if (snapshot?.contextAlias === session.contextAlias) {
+        const [hit, ...others] = fromSnapshot(snapshot, ref, subscriptions);
+        if (hit !== undefined && others.length === 0) return hit.id;
+        if (hit !== undefined) throw ambiguous(ref, [hit, ...others], session);
+        // Not in the snapshot: it may be newer than the last refresh, so ask Azure.
+      }
+
       const key = cacheKey(session.contextAlias, ref);
       const hit = cache.get(key);
       if (hit !== undefined && hit.expiresAt > now()) return hit.id;
       cache.delete(key);
 
-      const subscriptions =
-        ref.subscription === undefined ? undefined : [session.subscriptionId(ref.subscription)];
       const raw = await deps.resourceGraph.query<unknown>(buildQuery(ref), {
         maxRows: MAX_CANDIDATES + 1,
         ...(subscriptions === undefined ? {} : { subscriptions }),
