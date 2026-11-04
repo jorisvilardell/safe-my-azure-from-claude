@@ -1,6 +1,7 @@
 import type { LoginController } from '../core/azure/index.js';
 import type { Feature } from '../core/mcp/index.js';
 import { createContextsFeature } from '../features/contexts/index.js';
+import { createMetricsFeature } from '../features/metrics/index.js';
 import { createSystemFeature } from '../features/system/index.js';
 
 export interface FeatureDeps {
@@ -16,6 +17,7 @@ export function buildFeatures(deps: FeatureDeps): Feature[] {
   features.push(
     createSystemFeature({ version: deps.version, listFeatures: () => features }),
     createContextsFeature({ logins: deps.logins, loginUrl: deps.loginUrl }),
+    createMetricsFeature(),
     // createInventoryFeature(...), ...
   );
   return features;
