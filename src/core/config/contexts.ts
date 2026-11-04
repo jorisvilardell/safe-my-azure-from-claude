@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { parse } from 'yaml';
 import { z } from 'zod';
 
-const GUID = z.uuid();
+// z.guid(), not z.uuid(): RFC version bits would reject the fake IDs used in docs and tests (R7).
+const GUID = z.guid();
 const ALIAS = z
   .string()
   .regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'alias must be lowercase kebab-case (max 40 chars)');
@@ -12,11 +13,18 @@ const ContextSchema = z.object({
   subscriptions: z.record(ALIAS, GUID).default({}),
 });
 
-export const ContextsFileSchema = z.object({
-  contexts: z.record(ALIAS, ContextSchema).default({}),
-  /** Tag keys whose VALUES may be shown to the AI. Everything else is masked. */
-  safeTagKeys: z.array(z.string()).default([]),
-});
+export const ContextsFileSchema = z
+  .object({
+    contexts: z.record(ALIAS, ContextSchema).default({}),
+    /** Context active at startup. Must be one of the declared aliases. */
+    defaultContext: ALIAS.optional(),
+    /** Tag keys whose VALUES may be shown to the AI. Everything else is masked. */
+    safeTagKeys: z.array(z.string()).default([]),
+  })
+  .refine((f) => f.defaultContext === undefined || Object.hasOwn(f.contexts, f.defaultContext), {
+    message: 'defaultContext must reference a declared context alias',
+    path: ['defaultContext'],
+  });
 
 export type ContextsFile = z.infer<typeof ContextsFileSchema>;
 export type AzureContext = z.infer<typeof ContextSchema>;

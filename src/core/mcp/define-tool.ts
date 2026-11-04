@@ -17,7 +17,9 @@ export interface ToolDefinition<S extends z.ZodRawShape = z.ZodRawShape> {
   readonly title: string;
   readonly description: string;
   readonly inputSchema: S;
-  readonly handler: (args: z.infer<z.ZodObject<S>>, ctx: ToolContext) => Promise<unknown>;
+  // Method syntax (bivariant) so a tool with a typed input fits `readonly ToolDefinition[]`.
+  // Safe: the SDK validates args against `inputSchema` before calling the handler.
+  handler(args: z.infer<z.ZodObject<S>>, ctx: ToolContext): Promise<unknown>;
 }
 
 /** Every tool is read-only by construction (AGENTS.md R2). */
