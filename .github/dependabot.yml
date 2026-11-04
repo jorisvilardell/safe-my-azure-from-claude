@@ -6,6 +6,13 @@ updates:
     groups:
       azure: { patterns: ['@azure/*'] }
       dev: { dependency-type: development }
+    ignore:
+      # typescript-eslint supports TypeScript < 6.1 only. Lift this once it supports TS 7.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      # Types must match the lowest supported runtime (engines: node >=24).
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
