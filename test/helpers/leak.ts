@@ -5,7 +5,7 @@ import { FAKE_ACCESS_TOKEN, FAKE_CONTEXTS } from './azure.js';
 export type LeakPattern = readonly [label: string, pattern: RegExp];
 export type Canary = readonly [label: string, value: string];
 
-/** Public IPs planted in fixtures. Kept apart because the scrubber does not handle them yet (#4). */
+/** Public IPs planted in fixtures (doc ranges). The scrubber must replace them with `public-ip-*`. */
 export const PUBLIC_IP_CANARIES: readonly Canary[] = [
   ['public IP', v.PUBLIC_IP_CLIENT],
   ['public IP', v.PUBLIC_IP_PEER],

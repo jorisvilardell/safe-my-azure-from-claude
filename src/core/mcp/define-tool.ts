@@ -1,6 +1,6 @@
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';
-import { scrub, type Pseudonymizer } from '../anonymizer/index.js';
+import { scrub, type Pseudonymizer, type ScrubOptions } from '../anonymizer/index.js';
 import type { AzureAccess } from '../azure/index.js';
 import { sanitizeError } from '../errors/index.js';
 import type { Logger } from '../logging/index.js';
@@ -8,6 +8,8 @@ import type { Logger } from '../logging/index.js';
 /** Shared dependencies handed to every tool handler. Extend here, not per feature. */
 export interface ToolContext {
   readonly pseudonymizer: Pseudonymizer;
+  /** safeTagKeys / publicIpIndex. Omitted = most restrictive (every tag value masked). */
+  readonly scrubOptions?: ScrubOptions;
   readonly logger: Logger;
   readonly azure: AzureAccess;
 }
@@ -46,13 +48,17 @@ export async function executeTool<S extends z.ZodRawShape>(
 ): Promise<CallToolResult> {
   try {
     const result = await def.handler(args, ctx);
-    return { content: [{ type: 'text', text: JSON.stringify(scrub(result, ctx.pseudonymizer), null, 2) }] };
+    return {
+      content: [
+        { type: 'text', text: JSON.stringify(scrub(result, ctx.pseudonymizer, ctx.scrubOptions), null, 2) },
+      ],
+    };
   } catch (err) {
     const safe = sanitizeError(err);
     ctx.logger.warn('tool failed', { tool: def.name, code: safe.code });
     return {
       isError: true,
-      content: [{ type: 'text', text: JSON.stringify(scrub(safe, ctx.pseudonymizer)) }],
+      content: [{ type: 'text', text: JSON.stringify(scrub(safe, ctx.pseudonymizer, ctx.scrubOptions)) }],
     };
   }
 }

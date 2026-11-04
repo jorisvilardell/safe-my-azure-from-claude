@@ -1,4 +1,9 @@
-export type PseudonymKind = 'id' | 'user' | 'ip';
+/**
+ * `id` generic GUIDs, `user` people (emails, UPNs, display names), `app` service principals and
+ * app registrations, `public-ip-external` public IPs that are not one of our Public IP resources.
+ * `ip` is kept for backward compatibility.
+ */
+export type PseudonymKind = 'id' | 'user' | 'app' | 'ip' | 'public-ip-external';
 
 /**
  * Maps sensitive values to stable, meaningless placeholders (`id-001`, `user-002`).

@@ -75,3 +75,87 @@ describe('scrub (deep)', () => {
     expect(JSON.stringify(out)).toContain('2026-01-01T00:00:00.000Z');
   });
 });
+
+describe('pathological input', () => {
+  it.each([
+    ['dots', '1.'.repeat(100_000)],
+    ['dashes', `x-ms${'-a'.repeat(100_000)}`],
+    ['colons', 'abcd:'.repeat(50_000)],
+    ['quotes', `"${'a'.repeat(200_000)}`],
+  ])('scrubs a long %s run in linear time', (_label, input) => {
+    const start = performance.now();
+    scrubString(input, new Pseudonymizer());
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+});
+
+describe('golden: activity log event', () => {
+  const APP = '00000000-0000-0000-0000-0000000000a1';
+  const event = {
+    caller: 'jane.doe@contoso.example',
+    eventTimestamp: '2026-01-01T10:30:00.0000000Z',
+    operationName: { value: 'Microsoft.Network/networkSecurityGroups/securityRules/write' },
+    resourceId: `/subscriptions/${SUB}/resourceGroups/rg-net/providers/Microsoft.Network/networkSecurityGroups/nsg-web`,
+    authorization: { action: 'Microsoft.Network/networkSecurityGroups/securityRules/write', scope: VM_ID },
+    claims: {
+      'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name': 'Jane Doe',
+      appid: APP,
+      ipaddr: '2001:db8::42',
+    },
+    httpRequest: {
+      clientIpAddress: '198.51.100.23',
+      clientRequestId: '00000000-0000-0000-0000-0000000000c1',
+    },
+    properties: {
+      requestbody: JSON.stringify({
+        properties: { sourceAddressPrefix: '203.0.113.0/24', destinationAddressPrefix: '10.0.1.0/24' },
+        clientSecret: 'c2VjcmV0',
+      }),
+      statusCode: 'Created',
+      agentVersion: '1.10.2.0',
+    },
+    tags: { env: 'prod', owner: 'jane.doe@contoso.example' },
+  };
+
+  it('keeps names and private IPs, removes everything else', () => {
+    const out = scrub(event, new Pseudonymizer(), { safeTagKeys: ['env'] });
+    expectNoLeak(out);
+    const text = JSON.stringify(out);
+    for (const leaked of ['Jane', 'jane', '2001:db8', '198.51.100', '203.0.113', 'c2VjcmV0']) {
+      expect(text).not.toContain(leaked);
+    }
+    for (const kept of [
+      'nsg-web',
+      'rg-net',
+      '10.0.1.0/24',
+      '1.10.2.0',
+      '"env":"prod"',
+      'app-001',
+      'Created',
+    ]) {
+      expect(text).toContain(kept);
+    }
+  });
+});
+
+describe('LEAK_PATTERNS public IPv4', () => {
+  it.each(['203.0.113.5', '198.51.100.7', '192.0.2.1', 'ip=172.32.0.1'])('flags %s', (text) => {
+    expect(() => {
+      expectNoLeak(text);
+    }).toThrow(/public IPv4/);
+  });
+
+  it.each([
+    '10.0.0.4',
+    '172.16.5.4',
+    '192.168.0.1',
+    '100.64.0.1',
+    '127.0.0.1',
+    '169.254.169.254',
+    '168.63.129.16',
+    'v1.2.3.4',
+    '"agentVersion": "1.10.2.0"',
+  ])('ignores %s', (text) => {
+    expectNoLeak(text);
+  });
+});

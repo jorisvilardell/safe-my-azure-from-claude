@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { buildFeatures } from './app/features.js';
 import { startHttpServer } from './app/server.js';
-import { Pseudonymizer } from './core/anonymizer/index.js';
+import { createAnonymizer } from './core/anonymizer/index.js';
 import {
   createAzureAccess,
   createClientFactory,
@@ -40,7 +40,8 @@ async function main(): Promise<void> {
   const resolver = createResourceResolver({ resourceGraph, session, contexts: store });
   const azure = createAzureAccess({ contexts: contexts.contexts, store, credentials, resolver });
 
-  const ctx = { pseudonymizer: new Pseudonymizer(aliases), logger, azure };
+  const anonymizer = createAnonymizer({ aliases, safeTagKeys: contexts.safeTagKeys });
+  const ctx = { pseudonymizer: anonymizer.pseudonymizer, scrubOptions: anonymizer.options, logger, azure };
   const features = buildFeatures({ version, logins: credentials, loginUrl: loginPageUrl(env) });
 
   logger.info('starting', {
