@@ -29,6 +29,12 @@ export const LEAK_PATTERNS: readonly (readonly [string, RegExp])[] = [
   ['JWT', /\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}/],
   ['email', /\b[\w.%+-]+@[\w-]+(?:\.[\w-]+)+\b/],
   ['bearer', /Bearer\s+(?!\[REDACTED\])\S+/i],
+  // Public IPv4: excludes 10/8, 127/8, 0/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, 224/4, 240/4,
+  // the Azure platform IP 168.63.129.16, dotted versions (`v1.2.3.4`, `agentVersion: "1.10.2.0"`).
+  [
+    'public IPv4',
+    /(?<![\w.])(?<!version["']?\s*[:=]?\s*["']?)(?!(?:10|127|0|22[4-9]|2[3-5]\d)\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|168\.63\.129\.16(?!\d))(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?!\w|\.\d)/i,
+  ],
 ];
 
 /** Fails if `output` matches a LEAK_PATTERN or contains any CANARY verbatim (see `leak.ts`). */

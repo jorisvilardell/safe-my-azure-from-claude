@@ -1,7 +1,64 @@
-import { ARM_ID, BEARER, EMAIL, GUID, JWT, KEY_VALUE_SECRET, PEM } from './patterns.js';
-import type { Pseudonymizer } from './pseudonymizer.js';
+import {
+  isAppIdKey,
+  isIdentityContext,
+  isSecretKey,
+  isTagsKey,
+  isUserKey,
+  isVersionKey,
+  normalizeKey,
+} from './fields.js';
+import { maskPublicIPv4, maskPublicIPv6, type PublicIpIndex } from './ip.js';
+import {
+  ARM_ID,
+  BEARER,
+  EMAIL,
+  GUID,
+  GUID_ONLY,
+  HEADER_SECRET,
+  JSON_SECRET_FIELD,
+  JWT,
+  KEY_VALUE_SECRET,
+  PEM,
+  PEM_UNTERMINATED,
+  SAS_CONNECTION_STRING,
+  SAS_TOKEN,
+} from './patterns.js';
+import type { PseudonymKind, Pseudonymizer } from './pseudonymizer.js';
+import { MASKED, maskTags, normalizeTagKeys } from './tags.js';
 
 export const REDACTED = '[REDACTED]';
+
+/**
+ * Optional knobs for `scrub()` / `scrubString()`. Every default is the most restrictive one:
+ * with no options, every tag value is masked and every public IP becomes `public-ip-external-NNN`.
+ */
+export interface ScrubOptions {
+  /** Tag keys whose VALUES may be shown (`safeTagKeys` in contexts.yaml). Case-insensitive. */
+  readonly safeTagKeys?: Iterable<string>;
+  /** Maps our own public IPs to their Public IP resource name (`public-ip-<name>`). */
+  readonly publicIpIndex?: PublicIpIndex;
+}
+
+interface Resolved {
+  readonly safeTagKeys: ReadonlySet<string>;
+  readonly publicIpIndex: PublicIpIndex | undefined;
+}
+
+interface TextMode {
+  /** Kind used for bare GUIDs (`app` inside `appId`/`clientId` fields). */
+  readonly guidKind: PseudonymKind;
+  /** False for `*Version` fields, whose dotted values (`1.10.2.0`) are not IPs. */
+  readonly maskIPv4: boolean;
+}
+
+const DEFAULT_MODE: TextMode = { guidKind: 'id', maskIPv4: true };
+
+function resolve(options: ScrubOptions): Resolved {
+  return {
+    safeTagKeys: normalizeTagKeys(options.safeTagKeys),
+    publicIpIndex: options.publicIpIndex,
+  };
+}
 
 /**
  * `/subscriptions/<sub>/resourceGroups/<rg>/providers/<ns>/<type>/<name>[/<childType>/<child>]`
@@ -27,29 +84,105 @@ export function shortenArmId(armId: string, p: Pseudonymizer): string {
   return [rg, ...tail].join('/');
 }
 
-export function scrubString(input: string, p: Pseudonymizer): string {
-  return input
+/**
+ * Order matters:
+ * 1. Secrets first (PEM, JWT, SAS, Bearer, key=value, JSON fields, headers): they are removed
+ *    whole, before any later pass could rewrite part of them and break the match.
+ * 2. ARM IDs before bare GUIDs: an ARM ID contains the subscription GUID and must be shortened
+ *    to names as a unit.
+ * 3. GUIDs, then emails.
+ * 4. IPs LAST. By then GUIDs and ARM IDs are placeholders, so digits inside them can no longer
+ *    look like an IP; IPv6 runs before IPv4 so `::ffff:203.0.113.5` is replaced whole.
+ */
+function scrubText(input: string, p: Pseudonymizer, r: Resolved, mode: TextMode): string {
+  const s = input
     .replace(PEM, REDACTED)
+    .replace(PEM_UNTERMINATED, REDACTED)
     .replace(JWT, REDACTED)
+    .replace(SAS_CONNECTION_STRING, `SharedAccessSignature=${REDACTED}`)
+    .replace(SAS_TOKEN, `SharedAccessSignature ${REDACTED}`)
     .replace(BEARER, `Bearer ${REDACTED}`)
     .replace(KEY_VALUE_SECRET, (_m, key: string) => `${key}=${REDACTED}`)
+    .replace(JSON_SECRET_FIELD, (_m, prefix: string) => `${prefix}"${REDACTED}"`)
+    .replace(HEADER_SECRET, (_m, name: string, sep: string) => `${name}${sep}${REDACTED}`)
     .replace(ARM_ID, (id) => shortenArmId(id, p))
-    .replace(GUID, (g) => p.pseudonym('id', g))
+    .replace(GUID, (g) => p.pseudonym(mode.guidKind, g))
     .replace(EMAIL, (e) => p.pseudonym('user', e));
+  const v6 = maskPublicIPv6(s, p, r.publicIpIndex);
+  return mode.maskIPv4 ? maskPublicIPv4(v6, p, r.publicIpIndex) : v6;
+}
+
+export function scrubString(input: string, p: Pseudonymizer, options: ScrubOptions = {}): string {
+  return scrubText(input, p, resolve(options), DEFAULT_MODE);
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date);
+}
+
+/** A person/caller field: a bare GUID is a service principal, anything else is a user. */
+function pseudonymizeIdentity(value: string, p: Pseudonymizer): string {
+  const trimmed = value.trim();
+  if (trimmed === '') return value;
+  return p.pseudonym(GUID_ONLY.test(trimmed) ? 'app' : 'user', trimmed);
+}
+
+function walk(value: unknown, p: Pseudonymizer, r: Resolved, key: string | undefined): unknown {
+  if (typeof value === 'string') {
+    const mode =
+      key === undefined
+        ? DEFAULT_MODE
+        : ({ guidKind: isAppIdKey(key) ? 'app' : 'id', maskIPv4: !isVersionKey(key) } as const);
+    return scrubText(value, p, r, mode);
+  }
+  if (Array.isArray(value)) return value.map((v) => walk(v, p, r, key));
+  if (value instanceof Date) return value.toISOString();
+  if (value !== null && typeof value === 'object') {
+    const inIdentity = isIdentityContext(key, value);
+    return Object.fromEntries(
+      Object.entries(value).map(
+        ([k, v]) => [scrubText(k, p, r, DEFAULT_MODE), field(k, v, p, r, inIdentity)] as const,
+      ),
+    );
+  }
+  return value;
+}
+
+/** Applies the field-name rules (fields.ts) to the value of key `rawKey`. */
+function field(rawKey: string, value: unknown, p: Pseudonymizer, r: Resolved, inIdentity: boolean): unknown {
+  // Arrays inherit their key's rules: `owners: ['Jane Doe']`, `secrets: ['…']`.
+  if (Array.isArray(value)) return value.map((v) => field(rawKey, v, p, r, inIdentity));
+
+  const nk = normalizeKey(rawKey);
+
+  if (isSecretKey(rawKey) && (typeof value === 'string' || typeof value === 'number')) return REDACTED;
+
+  if (isTagsKey(nk) && isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(maskTags(value, r.safeTagKeys)).map(
+        ([tk, tv]) =>
+          // Allowlisted values are shown, but still go through the full scrubber.
+          [scrubText(tk, p, r, DEFAULT_MODE), tv === MASKED ? MASKED : walk(tv, p, r, undefined)] as const,
+      ),
+    );
+  }
+
+  if (typeof value === 'string' && isUserKey(nk, inIdentity)) return pseudonymizeIdentity(value, p);
+
+  return walk(value, p, r, nk);
 }
 
 /**
  * Deep-scrubs any JSON-like value. This is the single choke point that enforces
  * guarantees G1/G2 (AGENTS.md). Object KEYS are scrubbed too (tags, dynamic maps).
+ *
+ * On top of the string patterns, field names drive extra rules (see fields.ts):
+ * - secret-looking keys (`password`, `clientSecret`, `x-ms-token-*`, …) → `[REDACTED]`;
+ * - objects under a `tags` key → values `[masked]` unless the key is in `options.safeTagKeys`;
+ * - `appId`/`clientId`/… → `app-NNN`; `caller`/`userPrincipalName`/… (and `displayName`/`name`
+ *   inside an identity object) → `user-NNN`, or `app-NNN` when the value is a bare GUID;
+ * - `*Version` fields are not scanned for IPv4 (`1.10.2.0` is a version, not an address).
  */
-export function scrub(value: unknown, p: Pseudonymizer): unknown {
-  if (typeof value === 'string') return scrubString(value, p);
-  if (Array.isArray(value)) return value.map((v) => scrub(v, p));
-  if (value instanceof Date) return value.toISOString();
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [scrubString(k, p), scrub(v, p)] as const),
-    );
-  }
-  return value;
+export function scrub(value: unknown, p: Pseudonymizer, options: ScrubOptions = {}): unknown {
+  return walk(value, p, resolve(options), undefined);
 }

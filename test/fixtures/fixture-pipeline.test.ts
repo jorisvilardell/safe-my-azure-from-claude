@@ -13,12 +13,6 @@ import { AZURE_PAYLOAD_FIXTURES, createRestError } from './azure/index.js';
 
 const PUBLIC_IPS = PUBLIC_IP_CANARIES.map(([, value]) => value);
 
-const hasPublicIp = (text: string): boolean => PUBLIC_IPS.some((ip) => text.includes(ip));
-
-/** Hides the public IPs that only #4 will anonymise, so every OTHER canary is still enforced today. */
-const maskPublicIps = (text: string): string =>
-  PUBLIC_IPS.reduce((acc, ip) => acc.replaceAll(ip, '<public-ip-pending-#4>'), text);
-
 describe('fixture pipeline: raw Azure payload → scrub()', () => {
   for (const [name, fixture] of Object.entries(AZURE_PAYLOAD_FIXTURES)) {
     it(`the raw ${name} is a meaningful canary (it leaks before scrubbing)`, () => {
@@ -29,17 +23,10 @@ describe('fixture pipeline: raw Azure payload → scrub()', () => {
 
     it(`scrub() removes identifiers and secrets from the ${name}, keeping resource names`, () => {
       const out = toLeakText(scrub(fixture, new Pseudonymizer()));
-      expectNoLeak(maskPublicIps(out));
+      expectNoLeak(out);
       expect(out.toLowerCase()).toContain('vm-web-01');
+      for (const ip of PUBLIC_IPS) expect(out).not.toContain(ip);
     });
-
-    if (hasPublicIp(toLeakText(fixture))) {
-      // Pending #4: scrub() does not anonymise public IPs yet. Once #4 lands this test starts
-      // passing and `it.fails` turns red: switch it to a plain `it`.
-      it.fails(`scrub() anonymises public IPs in the ${name} (pending #4)`, () => {
-        expectNoLeak(scrub(fixture, new Pseudonymizer()));
-      });
-    }
   }
 });
 
@@ -72,10 +59,6 @@ describe('fixture pipeline: Azure SDK RestError → sanitizeError()', () => {
   });
 
   it('scrub() alone also redacts the auth header and IDs if the error object is returned', () => {
-    expectNoLeak(
-      maskPublicIps(
-        toLeakText(scrub(Object.fromEntries(Object.entries(createRestError())), new Pseudonymizer())),
-      ),
-    );
+    expectNoLeak(scrub(Object.fromEntries(Object.entries(createRestError())), new Pseudonymizer()));
   });
 });
