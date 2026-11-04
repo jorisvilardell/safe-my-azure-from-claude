@@ -30,7 +30,7 @@ export interface PublicIpIndexOptions {
 }
 
 export function createPublicIpIndex(
-  resourceGraph: ResourceGraph,
+  resourceGraph: Pick<ResourceGraph, 'query'>,
   opts: PublicIpIndexOptions = {},
 ): PublicIpLookup {
   const ttlMs = opts.ttlMs ?? PUBLIC_IP_TTL_MS;

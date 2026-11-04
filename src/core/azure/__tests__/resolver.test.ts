@@ -44,7 +44,7 @@ function setup(resources: readonly FakeResource[]): Setup {
   const query = vi.fn<(kql: string, opts?: ResourceQueryOptions) => Promise<unknown[]>>(() =>
     Promise.resolve(resources.map(row)),
   );
-  const resourceGraph: ResourceGraph = { query: query as ResourceGraph['query'] };
+  const resourceGraph: Pick<ResourceGraph, 'query'> = { query: query as ResourceGraph['query'] };
   const clock = { now: 1_000_000 };
   const resolver = createResourceResolver({
     resourceGraph,

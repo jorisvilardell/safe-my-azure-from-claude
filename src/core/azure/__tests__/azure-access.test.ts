@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { FAKE_CONTEXTS, createFakeTokenCredential, expectNoLeak } from '../../../../test/helpers/index.js';
+import {
+  FAKE_CONTEXTS,
+  createFakeClientFactory,
+  createFakeTokenCredential,
+  expectNoLeak,
+} from '../../../../test/helpers/index.js';
 import { AppError } from '../../errors/index.js';
-import { createAzureAccess, createContextStore, type CredentialProvider } from '../index.js';
+import {
+  RESOURCE_GRAPH_CLIENT_KEY,
+  createAzureAccess,
+  createContextStore,
+  type CredentialProvider,
+  type ResourceGraphQueryClient,
+} from '../index.js';
 
 function expectAppError(fn: () => unknown, code: string): void {
   try {
@@ -112,5 +123,40 @@ describe('createAzureAccess', () => {
 
   it('fails when the active context is not logged in', () => {
     expectAppError(() => build('lab').session(), 'NotLoggedIn');
+  });
+
+  it('shares one client cache, Resource Graph client and resolver, bound to the active session', async () => {
+    const store = createContextStore({
+      contexts: FAKE_CONTEXTS,
+      isLoggedIn: () => true,
+      initialActive: 'prod',
+    });
+    const clients = createFakeClientFactory();
+    const requests: { query: string; subscriptions?: string[] }[] = [];
+    const row = {
+      id: '/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-api',
+      name: 'app-api',
+      type: 'microsoft.web/sites',
+      resourceGroup: 'rg-app',
+      subscriptionId: '00000000-0000-0000-0000-000000000001',
+    };
+    const fakeClient: ResourceGraphQueryClient = {
+      resources(request) {
+        requests.push(request);
+        return Promise.resolve({ data: [row] });
+      },
+    };
+    clients.stub(RESOURCE_GRAPH_CLIENT_KEY, fakeClient);
+    const azure = createAzureAccess({ contexts: FAKE_CONTEXTS, store, credentials, clients });
+
+    expect(azure.clients).toBe(clients);
+    // The default resolver goes through the shared Resource Graph client.
+    await expect(azure.resolver.resolve({ name: 'app-api' })).resolves.toBe(row.id);
+    await expect(azure.resourceGraph.queryResult('resources')).resolves.toEqual({
+      rows: [row],
+      truncated: false,
+    });
+    expect(requests).toHaveLength(2);
+    expect(requests.every((r) => r.subscriptions?.length === 2)).toBe(true);
   });
 });

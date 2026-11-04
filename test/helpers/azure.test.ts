@@ -52,6 +52,51 @@ describe('createFakeAzureAccess', () => {
     });
   });
 
+  it('serves stubbed Resource Graph rows through the real client, and records queries', async () => {
+    const azure = createFakeAzureAccess({ resourceGraphRows: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] });
+    await expect(azure.resourceGraph.queryResult('resources', { maxRows: 2 })).resolves.toEqual({
+      rows: [{ name: 'a' }, { name: 'b' }],
+      truncated: true,
+    });
+
+    azure.setResourceGraphRows(({ query }) => (query.includes('publicipaddresses') ? [{ ip: 1 }] : []));
+    await expect(azure.resourceGraph.query("resources | where type =~ 'publicipaddresses'")).resolves.toEqual(
+      [{ ip: 1 }],
+    );
+    await expect(azure.resourceGraph.query('resources')).resolves.toEqual([]);
+
+    expect(azure.resourceGraphQueries.map((q) => q.query)).toEqual([
+      'resources',
+      "resources | where type =~ 'publicipaddresses'",
+      'resources',
+    ]);
+    expect(azure.resourceGraphQueries[0]?.subscriptions).toEqual(azure.session().subscriptionIds());
+  });
+
+  it('pages large row sets like Azure', async () => {
+    const many = Array.from({ length: 1500 }, (_, n) => ({ n }));
+    const azure = createFakeAzureAccess({ resourceGraphRows: many });
+    await expect(azure.resourceGraph.queryResult('resources', { maxRows: 2000 })).resolves.toMatchObject({
+      truncated: false,
+    });
+    expect((await azure.resourceGraph.query('resources', { maxRows: 2000 })).length).toBe(1500);
+  });
+
+  it('stubs other SDK clients by key, and refuses unstubbed ones', () => {
+    const azure = createFakeAzureAccess();
+    const session = azure.session();
+    const fake = { list: () => [] };
+    azure.stubClient(/^alerts:/, fake);
+
+    const create = (): never => {
+      throw new Error('a real client must never be built');
+    };
+    expect(azure.clients.getClient(session, 'alerts:00000000-0000-0000-0000-000000000001', create)).toBe(
+      fake,
+    );
+    expect(() => azure.clients.getClient(session, 'monitor', create)).toThrow(/No fake Azure SDK client/);
+  });
+
   it('is part of the default test tool context', () => {
     expect(createTestToolContext().azure.contexts.active()).toBe('prod');
   });

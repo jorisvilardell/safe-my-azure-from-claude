@@ -2,8 +2,11 @@ import type { AccessToken, TokenCredential } from '@azure/core-auth';
 import {
   createAzureAccess,
   createContextStore,
+  RESOURCE_GRAPH_CLIENT_KEY,
   type AzureAccess,
+  type ClientFactory,
   type CredentialProvider,
+  type ResourceGraphQueryClient,
   type ResourceRef,
   type ResourceResolver,
 } from '../../src/core/azure/index.js';
@@ -58,13 +61,26 @@ export const FAKE_RESOURCES: readonly FakeResource[] = [
   },
 ];
 
+/** One call that reached the fake Resource Graph. */
+export interface FakeResourceGraphQuery {
+  readonly query: string;
+  /** Real (fake) subscription IDs the query was scoped to. */
+  readonly subscriptions: readonly string[];
+}
+
+/** Rows the fake Resource Graph returns: a fixed list, or computed per query. */
+export type FakeResourceGraphRows = readonly unknown[] | ((q: FakeResourceGraphQuery) => readonly unknown[]);
+
 export interface FakeAzureAccessOptions {
   readonly contexts?: Readonly<Record<string, AzureContext>>;
   /** Contexts that start logged in. Defaults to all of them. */
   readonly loggedIn?: readonly string[];
   /** Initially active context. Defaults to `prod` when declared, else none. */
   readonly active?: string;
+  /** Resources the fake `resolver` knows. */
   readonly resources?: readonly FakeResource[];
+  /** What `resourceGraph.query()` returns. Defaults to no rows. See `setResourceGraphRows`. */
+  readonly resourceGraphRows?: FakeResourceGraphRows;
 }
 
 export interface FakeAzureAccess extends AzureAccess {
@@ -72,6 +88,69 @@ export interface FakeAzureAccess extends AzureAccess {
   logout(contextAlias: string): void;
   /** ARM IDs of the fake resources, as the resolver builds them. */
   armId(resource: FakeResource): string;
+  /**
+   * Sets what the shared `resourceGraph` returns. It is the REAL Resource Graph client (scoping,
+   * row caps, paging and `truncated` all run) over a fake transport that serves these rows,
+   * `top` rows per page. Raw rows go through unchanged, so put realistic Azure fields in them.
+   *
+   * ```ts
+   * azure.setResourceGraphRows([{ id: ARM_ID, name: 'vm-web-01', type: 'microsoft.compute/virtualmachines' }]);
+   * azure.setResourceGraphRows(({ query }) => (query.includes('publicipaddresses') ? ipRows : []));
+   * ```
+   */
+  setResourceGraphRows(rows: FakeResourceGraphRows): void;
+  /** Every query that reached the fake Resource Graph, oldest first. */
+  readonly resourceGraphQueries: readonly FakeResourceGraphQuery[];
+  /** Stubs an Azure SDK client in `clients`. See `FakeClientFactory.stub`. */
+  stubClient(key: string | RegExp, client: unknown): void;
+}
+
+/** `ClientFactory` that hands out stubs and never builds a real SDK client (no network in tests). */
+export interface FakeClientFactory extends ClientFactory {
+  /**
+   * `getClient(session, key, create)` returns `client` for a matching key instead of calling `create`.
+   * Use a RegExp for per-subscription keys (`/^alerts:/`). Later stubs win. An unstubbed key throws.
+   */
+  stub(key: string | RegExp, client: unknown): void;
+}
+
+export function createFakeClientFactory(): FakeClientFactory {
+  const stubs: { readonly key: string | RegExp; readonly client: unknown }[] = [];
+  return {
+    getClient(_session, key) {
+      const hit = stubs.findLast((s) => (typeof s.key === 'string' ? s.key === key : s.key.test(key)));
+      if (hit === undefined) {
+        throw new Error(`No fake Azure SDK client for "${key}". Stub it with azure.stubClient(key, client).`);
+      }
+      // Test-only: the test that stubs a key is responsible for giving it the client's shape.
+      return hit.client as never;
+    },
+    invalidate: () => undefined,
+    stub(key, client) {
+      stubs.push({ key, client });
+    },
+  };
+}
+
+/** Real `ResourceGraphQueryClient` contract over in-memory rows, paged with `top` / `skipToken`. */
+function createFakeResourceGraphClient(
+  getRows: () => FakeResourceGraphRows,
+  log: FakeResourceGraphQuery[],
+): ResourceGraphQueryClient {
+  return {
+    resources(request) {
+      const q: FakeResourceGraphQuery = { query: request.query, subscriptions: request.subscriptions ?? [] };
+      const source = getRows();
+      const all = typeof source === 'function' ? source(q) : source;
+      const offset = Number(request.options?.skipToken ?? '0');
+      if (offset === 0) log.push(q);
+      const end = offset + (request.options?.top ?? all.length);
+      return Promise.resolve({
+        data: all.slice(offset, end),
+        ...(end < all.length ? { skipToken: String(end) } : {}),
+      });
+    },
+  };
 }
 
 export function createFakeTokenCredential(token = FAKE_ACCESS_TOKEN): TokenCredential {
@@ -81,7 +160,17 @@ export function createFakeTokenCredential(token = FAKE_ACCESS_TOKEN): TokenCrede
   };
 }
 
-/** In-memory `AzureAccess`. Uses the real context store + session logic, faking only credentials and Azure. */
+/**
+ * In-memory `AzureAccess`. Uses the real context store, session logic and Resource Graph client,
+ * faking only credentials and Azure itself. In a feature test:
+ *
+ * - Resource Graph: `createFakeAzureAccess({ resourceGraphRows })` or `azure.setResourceGraphRows(...)`,
+ *   then assert on `azure.resourceGraphQueries`.
+ * - Other SDK clients: `azure.stubClient(key, fakeClient)` with the key the service passes to
+ *   `ctx.azure.clients.getClient(session, key, create)`. An unstubbed key throws.
+ * - Names → IDs: `resolver` is in-memory, over `resources` (default `FAKE_RESOURCES`); `armId(r)`
+ *   gives the ID it returns.
+ */
 export function createFakeAzureAccess(opts: FakeAzureAccessOptions = {}): FakeAzureAccess {
   const contexts = opts.contexts ?? FAKE_CONTEXTS;
   const resources = opts.resources ?? FAKE_RESOURCES;
@@ -147,12 +236,27 @@ export function createFakeAzureAccess(opts: FakeAzureAccessOptions = {}): FakeAz
     },
   };
 
-  const access = createAzureAccess({ contexts, store, credentials, resolver });
+  let resourceGraphRows: FakeResourceGraphRows = opts.resourceGraphRows ?? [];
+  const resourceGraphQueries: FakeResourceGraphQuery[] = [];
+  const clients = createFakeClientFactory();
+  clients.stub(
+    RESOURCE_GRAPH_CLIENT_KEY,
+    createFakeResourceGraphClient(() => resourceGraphRows, resourceGraphQueries),
+  );
+
+  const access = createAzureAccess({ contexts, store, credentials, clients, resolver });
 
   return {
     ...access,
     login: (alias) => loggedIn.add(alias),
     logout: (alias) => loggedIn.delete(alias),
     armId,
+    setResourceGraphRows(rows) {
+      resourceGraphRows = rows;
+    },
+    resourceGraphQueries,
+    stubClient: (key, client) => {
+      clients.stub(key, client);
+    },
   };
 }
