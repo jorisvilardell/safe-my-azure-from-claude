@@ -51,8 +51,24 @@ src/
       └─ __tests__/           # Unit tests for this feature (fixtures with FAKE ids)
 ```
 
-Planned features: `system` (exists, the reference example), `contexts` (login and tenant switching),
-`inventory`, `alerts`, `monitor` (metrics), `logs` (KQL), `health` (resource/service health + advisor).
+Features (registered in `src/app/features.ts`; every tool is listed in
+[docs/USAGE.md](./docs/USAGE.md#7-tool-reference)):
+
+| Feature     | Tools                                                                               |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `system`    | `server_info` (the smallest feature: start here as a reference)                     |
+| `contexts`  | `list_contexts`, `use_context`, `login`, `login_status`, `logout`                   |
+| `inventory` | `list_subscriptions`, `list_resource_groups`, `search_resources`, `get_resource`    |
+| `alerts`    | `list_fired_alerts`, `get_alert`, `list_alert_rules`, `get_activity_log`            |
+| `metrics`   | `list_metric_definitions`, `get_metrics`                                            |
+| `logs`      | `list_workspaces`, `list_tables`, `run_kql`                                         |
+| `health`    | `get_resource_health`, `list_service_health_events`, `list_advisor_recommendations` |
+
+Planned: prompt-injection hardening ([#39](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/39)),
+an audit log ([#13](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/13)), an in-memory
+inventory index ([#33](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/33)) and Dev Proxy
+mocks ([#37](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/37)). The threat model is in
+[docs/SECURITY.md](./docs/SECURITY.md).
 
 ### Dependency rules (enforced by ESLint `no-restricted-imports`)
 
@@ -156,6 +172,10 @@ When in doubt, choose the option that reveals **less** to the AI.
 - Branch from `main` (`feat/<feature>`, `fix/…`, `chore/…`).
 - **Commit & PR format:** a short title (Conventional Commits style, e.g. `feat(inventory): add search_resources`), optionally followed by a short description. A description isn't required.
 - **No co-authoring:** never add `Co-Authored-By:` trailers, "Generated with …" footers, or any AI attribution to commits or pull requests.
+- **Commit author email:** commits must be authored with the maintainer's GitHub noreply address,
+  `73846641+jorisvilardell@users.noreply.github.com` (`git config user.email` in the repo). With any
+  other address, GitHub's squash merge adds a `Co-authored-by:` trailer to the merged commit, which
+  this repo forbids.
 - **Squash merge only:** each PR lands on `main` as one commit, titled with the PR title.
 - CI (`.github/workflows/ci.yml`) runs `npm run check` on Node 24 and 26, and builds the Docker image. A PR must be green before merge.
 - Don't commit `config/contexts.yaml`, `.env`, or anything containing a real tenant or subscription ID. They're gitignored.
