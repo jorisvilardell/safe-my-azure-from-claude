@@ -2,7 +2,10 @@ import type { LoginController } from '../core/azure/index.js';
 import type { Feature } from '../core/mcp/index.js';
 import { createAlertsFeature } from '../features/alerts/index.js';
 import { createContextsFeature } from '../features/contexts/index.js';
+import { createHealthFeature } from '../features/health/index.js';
 import { createInventoryFeature } from '../features/inventory/index.js';
+import { createLogsFeature } from '../features/logs/index.js';
+import { createMetricsFeature } from '../features/metrics/index.js';
 import { createSystemFeature } from '../features/system/index.js';
 
 export interface FeatureDeps {
@@ -20,6 +23,9 @@ export function buildFeatures(deps: FeatureDeps): Feature[] {
     createContextsFeature({ logins: deps.logins, loginUrl: deps.loginUrl }),
     createInventoryFeature(),
     createAlertsFeature(),
+    createMetricsFeature(),
+    createLogsFeature(),
+    createHealthFeature(),
   );
   return features;
 }
