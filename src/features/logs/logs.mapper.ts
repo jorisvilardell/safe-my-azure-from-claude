@@ -1,4 +1,11 @@
 import { z } from 'zod';
+import {
+  neutralizeText,
+  stripInvisibleDeep,
+  truncateText,
+  untrustedText,
+  type Truncated,
+} from '../../core/safety/index.js';
 
 /** Rows returned to the AI. The guard appends `| take MAX_ROWS + 1` so we can tell when more exist. */
 export const MAX_ROWS = 500;
@@ -90,8 +97,8 @@ export interface QueryColumn {
 export interface QueryTable {
   readonly columns: readonly QueryColumn[];
   /**
-   * Cell values copied from the logs: attacker-controllable text. Kept as a separate array so a
-   * later "untrusted data" wrapper (#39) can mark it without reshaping the result.
+   * Cell values copied from the logs: attacker-controllable text (#39). Invisible characters are
+   * removed and `executeTool` flags instruction-like cells in `warnings` (`rows[i][j]`).
    */
   readonly rows: readonly unknown[][];
   readonly rowCount: number;
@@ -103,11 +110,9 @@ export interface QueryTable {
 /** Scrubs one value as if it were the field `key` of an object (field-name rules apply). */
 export type FieldScrubber = (key: string, value: unknown) => unknown;
 
-function cut(text: string): string {
-  let end = MAX_CELL_CHARS;
-  const code = text.charCodeAt(end - 1);
-  if (code >= 0xd800 && code <= 0xdbff) end--; // don't split a surrogate pair
-  return `${text.slice(0, end)}${CUT_MARK}`;
+/** Already scrubbed, so the cut may fall anywhere (never inside a surrogate pair). */
+function cut(text: string): Truncated {
+  return truncateText(text, MAX_CELL_CHARS, { ellipsis: CUT_MARK, at: 'char' });
 }
 
 interface CellResult {
@@ -116,11 +121,13 @@ interface CellResult {
 }
 
 /**
- * Normalises and caps one cell. The cell is scrubbed BEFORE it is cut: cutting first could split
- * a GUID, email, JWT or key into a fragment the scrubber no longer recognises, and leak it.
- * `executeTool` scrubs the whole result again afterwards (scrubbing is idempotent).
+ * Normalises and caps one cell. Invisible characters go first (`untrustedText` rules, line breaks
+ * kept), so they cannot hide an email from the scrubber. The cell is scrubbed BEFORE it is cut:
+ * cutting first could split a GUID, email, JWT or key into a fragment the scrubber no longer
+ * recognises, and leak it. `executeTool` scrubs the whole result again (scrubbing is idempotent).
  */
-function toCell(value: unknown, column: string, scrub: FieldScrubber): CellResult {
+function toCell(raw: unknown, column: string, scrub: FieldScrubber): CellResult {
+  const value = typeof raw === 'string' ? neutralizeText(raw, { multiline: true }) : stripInvisibleDeep(raw);
   if (value === null || value === undefined) return { value: null, cut: false };
   if (value instanceof Date) {
     return { value: Number.isNaN(value.getTime()) ? null : value.toISOString(), cut: false };
@@ -131,19 +138,18 @@ function toCell(value: unknown, column: string, scrub: FieldScrubber): CellResul
   // `UserPrincipalName`/`caller` columns are pseudonymised even without an email pattern.
   const scrubbed = scrub(column, value);
   if (typeof scrubbed === 'string') {
-    return scrubbed.length > MAX_CELL_CHARS
-      ? { value: cut(scrubbed), cut: true }
-      : { value: scrubbed, cut: false };
+    const c = cut(scrubbed);
+    return { value: c.text, cut: c.cut };
   }
   if (typeof scrubbed === 'object' && scrubbed !== null) {
     const json = JSON.stringify(scrubbed);
-    if (json.length > MAX_CELL_CHARS) return { value: cut(json), cut: true };
+    if (json.length > MAX_CELL_CHARS) return { value: cut(json).text, cut: true };
   }
   return { value: scrubbed, cut: false };
 }
 
 function toColumn(c: RawTable['columnDescriptors'][number], index: number): QueryColumn {
-  const name = typeof c.name === 'string' && c.name !== '' ? c.name.slice(0, 256) : `column${index + 1}`;
+  const name = untrustedText(c.name, { max: 256 }) ?? `column${index + 1}`;
   const type = typeof c.type === 'string' && COLUMN_TYPES.has(c.type) ? c.type : 'unknown';
   return { name, type };
 }

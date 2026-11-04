@@ -1,4 +1,5 @@
 import { shortenArmId, type Pseudonymizer } from '../../core/anonymizer/index.js';
+import { untrustedText } from '../../core/safety/index.js';
 
 /**
  * Cap for free text copied from Azure (descriptions, operation names, dimension values). Anyone
@@ -30,16 +31,11 @@ function num(v: unknown): number | string | undefined {
 }
 
 /**
- * Caps free text. The cut happens at whitespace and the partial word is dropped: cutting through
- * a GUID, ARM ID or token would leave a fragment the anonymizer can no longer recognise.
+ * Free text through `untrustedText()`: invisible characters removed, capped at whitespace (the
+ * partial word is dropped, so a GUID, ARM ID or token is never cut into an unrecognisable fragment).
  */
 export function capText(v: unknown, max = MAX_TEXT): string | undefined {
-  const s = str(v);
-  if (s === undefined) return undefined;
-  if (s.length <= max) return s;
-  const head = s.slice(0, max - 1);
-  const cut = head.search(/\s\S*$/u);
-  return `${cut === -1 ? '' : head.slice(0, cut)}…`;
+  return untrustedText(str(v), { max });
 }
 
 function instant(v: unknown): string | undefined {

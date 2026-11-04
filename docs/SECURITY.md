@@ -304,12 +304,15 @@ Stated plainly, so you can decide what to point this server at.
    description or a log line can write instructions for the AI. The tools are read-only and hold no
    token, so the damage is limited, but injected text could steer the investigation, trigger broad
    queries, or try to exfiltrate data through the client's other tools (web fetch, shell, other MCP
-   servers). Today, tool descriptions say that copied text is data, free text is length-capped, and
-   Service Health and Advisor text has HTML and invisible format characters removed. Systematic
-   hardening (untrusted-content markers, invisible-character stripping everywhere, injection
-   warnings) is **planned** in
-   [#39](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/39). Keep other
-   exfiltration-capable tools on approval while you use this server.
+   servers). Mitigations ([#39](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/39)):
+   every tool description (and the server instructions) starts with a notice that copied values are
+   untrusted data, and every result carries `_meta: { "safe-my-azure/untrusted": true }`;
+   zero-width, bidi, Unicode tag and control characters are stripped from every result before
+   scrubbing; free text is length-capped; and text that looks like an instruction (`ignore previous
+instructions`, `you are now`, `system:`, `<|…|>`, tool-call-shaped JSON, …) adds a top-level
+   `warnings` entry naming the field. The detection is a cheap heuristic: paraphrases, other
+   languages and homoglyphs (Cyrillic `о` for `o`) are not caught, and a warning never removes the
+   text. Keep other exfiltration-capable tools on approval while you use this server.
 5. **Over-masking.** A dotted version string outside a `*Version` field and not right after the
    word `version` (`agent 1.2.3.4 started`) looks like an IPv4 and becomes
    `public-ip-external-NNN`. Documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`,
@@ -332,8 +335,14 @@ Stated plainly, so you can decide what to point this server at.
 9. **Shared state.** Login state, the active context and the pseudonym map are server-wide, shared
    by every client connected to the server. Pseudonyms reset on restart.
 
-Planned work that changes this picture: an audit log of tool calls
-([#13](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/13)), an in-memory
+Audit trail ([#13](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/13)): every
+tool call writes one scrubbed JSON line (tool, scrubbed arguments, duration, outcome or error code,
+result size, row count, injection-warning count, never the result) to stderr by default.
+`AUDIT_LOG=file` with an explicit `AUDIT_LOG_FILE` appends to a mounted file instead (no rotation);
+`AUDIT_LOG=off` disables it. Remember that stderr may be readable by an agent: the lines are
+scrubbed like every other log line.
+
+Planned work that changes this picture: an in-memory
 inventory index that would also feed the public IP lookup
 ([#33](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/33)), and Dev Proxy mocks
 to test the real HTTP path end to end

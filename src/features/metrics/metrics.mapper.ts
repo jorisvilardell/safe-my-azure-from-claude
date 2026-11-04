@@ -1,3 +1,4 @@
+import { untrustedText } from '../../core/safety/index.js';
 import type { Aggregation } from './metrics.schemas.js';
 
 /** Length cap of free text copied from Azure (descriptions, display names). */
@@ -76,11 +77,9 @@ export interface MetricDto {
   readonly errorCode?: string;
 }
 
+/** Free text through `untrustedText()`: invisible characters removed, capped at `FREE_TEXT_MAX`. */
 export function capText(value: string | undefined): string | undefined {
-  if (value === undefined) return undefined;
-  const trimmed = value.trim();
-  if (trimmed === '') return undefined;
-  return trimmed.length > FREE_TEXT_MAX ? `${trimmed.slice(0, FREE_TEXT_MAX - 1)}…` : trimmed;
+  return untrustedText(value, { max: FREE_TEXT_MAX });
 }
 
 const optional = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
@@ -160,7 +159,7 @@ export function toMetricDtos(
     const series = kept.map((s): SeriesDto => ({
       dimensions: Object.fromEntries(
         (s.metadatavalues ?? []).flatMap((md) =>
-          md.name?.value === undefined ? [] : [[md.name.value, md.value ?? ''] as const],
+          md.name?.value === undefined ? [] : [[md.name.value, capText(md.value) ?? ''] as const],
         ),
       ),
       points:

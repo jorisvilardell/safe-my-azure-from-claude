@@ -1,6 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { z } from 'zod';
-import { executeTool, READ_ONLY_ANNOTATIONS, type ToolContext, type ToolDefinition } from './define-tool.js';
+import {
+  advertisedDescription,
+  executeTool,
+  READ_ONLY_ANNOTATIONS,
+  type ToolContext,
+  type ToolDefinition,
+} from './define-tool.js';
 
 /** A vertical slice: one business capability exposing one or more MCP tools. */
 export interface Feature {
@@ -23,7 +29,7 @@ export function registerFeatures(server: McpServer, features: readonly Feature[]
         tool.name,
         {
           title: tool.title,
-          description: tool.description,
+          description: advertisedDescription(tool),
           inputSchema: tool.inputSchema,
           annotations: READ_ONLY_ANNOTATIONS,
         },

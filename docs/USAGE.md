@@ -91,6 +91,12 @@ Check it: `docker compose ps` should show the container as `healthy` after about
 `docker-compose.yml`. Logs are scrubbed, and you read them yourself with `docker compose logs`. The
 AI is denied `docker logs` ([SECURITY.md §7](./SECURITY.md#7-claude-code-deny-rules)).
 
+Every tool call is also audited: one scrubbed JSON line (`"msg":"tool call"`) with the tool name,
+scrubbed arguments, duration, outcome, result size and row count. `AUDIT_LOG` picks where it goes:
+`stderr` (default, with the other logs), `off`, or `file`. For `file`, set
+`AUDIT_LOG_FILE=/app/audit/audit.jsonl` and uncomment the `./audit:/app/audit` volume in
+`docker-compose.yml`. The file is append-only and never rotated.
+
 After you edit `contexts.yaml`, restart: `docker compose restart`. A restart drops every sign-in,
 because tokens live in memory only.
 

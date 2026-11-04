@@ -10,7 +10,7 @@ import {
 } from './core/azure/index.js';
 import { contextIdAliases, loadContexts, loadEnv, loginPageUrl } from './core/config/index.js';
 import type { ToolContext } from './core/mcp/index.js';
-import { createLogger, silenceAzureSdkLogging } from './core/logging/index.js';
+import { createAuditLog, createLogger, silenceAzureSdkLogging } from './core/logging/index.js';
 
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
   version: string;
@@ -29,7 +29,14 @@ async function main(): Promise<void> {
 
   // Same rules as the tools, minus the public IP index: a log line must never trigger an Azure
   // call, so the logger shows every public IP as `public-ip-external-NNN`.
-  const logger = createLogger(env.LOG_LEVEL, { anonymizer: createAnonymizer(anonymizerConfig) });
+  const logAnonymizer = createAnonymizer(anonymizerConfig);
+  const logger = createLogger(env.LOG_LEVEL, { anonymizer: logAnonymizer });
+  // Same scrubbing as the logger. The file (if any) is opened now, so a bad path fails at startup.
+  const audit = createAuditLog({
+    mode: env.AUDIT_LOG,
+    anonymizer: logAnonymizer,
+    ...(env.AUDIT_LOG_FILE === undefined ? {} : { file: env.AUDIT_LOG_FILE }),
+  });
 
   const credentials = createCredentialManager({ contexts: contexts.contexts, logger });
   const store = createContextStore({
@@ -53,7 +60,7 @@ async function main(): Promise<void> {
   // A view over the inventory snapshot: our own public IPs are shown by resource name.
   const publicIpIndex = createPublicIpIndex(azure.inventory);
   const anonymizer = createAnonymizer({ ...anonymizerConfig, publicIpIndex });
-  const ctx: ToolContext = { anonymizer, logger, azure };
+  const ctx: ToolContext = { anonymizer, logger, azure, audit };
   const features = buildFeatures({ version, logins: credentials, loginUrl: loginPageUrl(env) });
 
   logger.info('starting', {
@@ -61,6 +68,7 @@ async function main(): Promise<void> {
     contexts: Object.keys(contexts.contexts).length,
     features: features.length,
     inventoryResource: env.INVENTORY_RESOURCE,
+    audit: env.AUDIT_LOG,
   });
   const server = startHttpServer({
     host: env.HOST,

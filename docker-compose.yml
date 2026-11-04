@@ -10,10 +10,17 @@ services:
     volumes:
       # Read-only tenant/subscription alias map. No credentials in it.
       - ./config/contexts.yaml:/app/config/contexts.yaml:ro
+      # Optional audit file (AUDIT_LOG=file, AUDIT_LOG_FILE=/app/audit/audit.jsonl). Lines are
+      # scrubbed like the logs; append-only, no rotation. The host folder must be writable by
+      # the container user (uid 1000).
+      # - ./audit:/app/audit
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       INVENTORY_MAX_RESOURCES: ${INVENTORY_MAX_RESOURCES:-50000}
       INVENTORY_RESOURCE: ${INVENTORY_RESOURCE:-off}
+      # Audit trail of tool calls: stderr (default) | file | off.
+      AUDIT_LOG: ${AUDIT_LOG:-stderr}
+      AUDIT_LOG_FILE: ${AUDIT_LOG_FILE:-}
     # Hardening: tokens live in process memory only (AGENTS.md R8).
     read_only: true
     tmpfs:

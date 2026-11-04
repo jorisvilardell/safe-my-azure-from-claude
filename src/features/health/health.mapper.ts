@@ -1,5 +1,6 @@
 import type { AvailabilityStatus, Event } from '@azure/arm-resourcehealth';
 import { z } from 'zod';
+import { untrustedText } from '../../core/safety/index.js';
 
 /** Cap for every free-text field copied from Azure (titles, summaries, Advisor text). */
 export const TEXT_CAP = 512;
@@ -18,27 +19,24 @@ const ENTITIES: Readonly<Record<string, string>> = {
 
 /**
  * Free text written by Azure (or by whoever can write to the tenant). Service Health summaries are
- * HTML: tags (and the URLs in their attributes) are dropped. Invisible format characters
- * (zero-width, bidi overrides, Unicode tags) are removed so nothing hides in the text (#39).
- * The result is capped at `TEXT_CAP` characters. The scrubber still runs on it afterwards.
+ * HTML: tags (and the URLs in their attributes) are dropped. The rest is `untrustedText()`:
+ * invisible characters removed so nothing hides in the text (#39), capped at `cap` characters.
+ * The scrubber still runs on it afterwards.
  */
 export function azureText(value: unknown, cap = TEXT_CAP): string | null {
   if (typeof value !== 'string') return null;
-  const text = value
+  const html = value
     .replace(/<\s*br\s*\/?>|<\/\s*(?:p|div|li|h\d)\s*>/gi, ' ')
     .replace(/<[^>]*>/g, '')
     .replace(/&(nbsp|amp|lt|gt|quot|apos|#39);/g, (_m, name: string) => ENTITIES[name] ?? '')
-    .replace(/\p{Cf}/gu, '')
-    .replace(/[\p{Cc}\s]+/gu, ' ')
-    .trim();
-  if (text === '') return null;
-  const chars = Array.from(text);
-  return chars.length <= cap ? text : `${chars.slice(0, cap - 1).join('')}…`;
+    // Other format characters (soft hyphen, Arabic letter mark, …) never carry meaning here.
+    .replace(/\p{Cf}/gu, '');
+  return untrustedText(html, { max: cap }) ?? null;
 }
 
 /** An enum-like value from Azure (`Available`, `ServiceIssue`): short, single word-ish. */
 function label(value: unknown): string | null {
-  return typeof value === 'string' && value !== '' ? value.slice(0, 64) : null;
+  return untrustedText(value, { max: 64 }) ?? null;
 }
 
 function isoTime(value: unknown): string | null {
