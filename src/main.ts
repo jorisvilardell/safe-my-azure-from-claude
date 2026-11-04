@@ -4,9 +4,11 @@ import { startHttpServer } from './app/server.js';
 import { Pseudonymizer } from './core/anonymizer/index.js';
 import {
   createAzureAccess,
+  createClientFactory,
   createContextStore,
+  createResourceGraph,
+  createResourceResolver,
   type CredentialProvider,
-  type ResourceResolver,
 } from './core/azure/index.js';
 import { loadContexts, loadEnv } from './core/config/index.js';
 import { AppError } from './core/errors/index.js';
@@ -28,21 +30,20 @@ async function main(): Promise<void> {
     for (const [subAlias, subId] of Object.entries(c.subscriptions)) aliases.set(subId, subAlias);
   }
 
-  // Placeholders until device-code login (#2) and the Resource Graph resolver (#3) land.
+  // Placeholder until device-code login (#2) lands.
   const credentials: CredentialProvider = {
     isLoggedIn: () => false,
     getCredential: (alias) => {
       throw new AppError('NotLoggedIn', `Context "${alias}" is not logged in. Login is not available yet.`);
     },
   };
-  const resolver: ResourceResolver = {
-    resolve: () =>
-      Promise.reject(new AppError('NotImplemented', 'Resource resolution is not available yet.')),
-  };
   const store = createContextStore({
     contexts: contexts.contexts,
     isLoggedIn: (alias) => credentials.isLoggedIn(alias),
   });
+  const session = () => azure.session();
+  const resourceGraph = createResourceGraph({ session, clients: createClientFactory() });
+  const resolver = createResourceResolver({ resourceGraph, session, contexts: store });
   const azure = createAzureAccess({ contexts: contexts.contexts, store, credentials, resolver });
 
   const ctx = { pseudonymizer: new Pseudonymizer(aliases), logger, azure };

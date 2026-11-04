@@ -24,6 +24,7 @@
     "check": "npm run lint && npm run format:check && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
+    "@azure/arm-resourcegraph": "^5.0.0",
     "@azure/core-auth": "^1.11.0",
     "@azure/identity": "^4.14.1",
     "@modelcontextprotocol/sdk": "^1.32.2",
