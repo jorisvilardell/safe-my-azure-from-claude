@@ -1,8 +1,8 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { expect } from 'vitest';
 import { Pseudonymizer } from '../../src/core/anonymizer/index.js';
 import { createLogger } from '../../src/core/logging/index.js';
 import { createFakeAzureAccess } from './azure.js';
+import { assertNoLeakWith } from './leak.js';
 import type { ToolContext } from '../../src/core/mcp/index.js';
 
 export function createTestToolContext(overrides: Partial<ToolContext> = {}): ToolContext {
@@ -31,12 +31,11 @@ export const LEAK_PATTERNS: readonly (readonly [string, RegExp])[] = [
   ['bearer', /Bearer\s+(?!\[REDACTED\])\S+/i],
 ];
 
+/** Fails if `output` matches a LEAK_PATTERN or contains any CANARY verbatim (see `leak.ts`). */
 export function expectNoLeak(output: unknown): void {
-  const text = typeof output === 'string' ? output : JSON.stringify(output);
-  for (const [label, pattern] of LEAK_PATTERNS) {
-    expect(text, `leak detected: ${label}`).not.toMatch(pattern);
-  }
+  assertNoLeakWith(output, LEAK_PATTERNS);
 }
 
 export * from './azure.js';
+export * from './leak.js';
 export * from './login.js';
