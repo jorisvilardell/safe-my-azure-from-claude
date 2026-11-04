@@ -1,6 +1,7 @@
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';
 import { scrub, type Pseudonymizer } from '../anonymizer/index.js';
+import type { AzureAccess } from '../azure/index.js';
 import { sanitizeError } from '../errors/index.js';
 import type { Logger } from '../logging/index.js';
 
@@ -8,6 +9,7 @@ import type { Logger } from '../logging/index.js';
 export interface ToolContext {
   readonly pseudonymizer: Pseudonymizer;
   readonly logger: Logger;
+  readonly azure: AzureAccess;
 }
 
 export interface ToolDefinition<S extends z.ZodRawShape = z.ZodRawShape> {

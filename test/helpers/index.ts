@@ -2,12 +2,14 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { expect } from 'vitest';
 import { Pseudonymizer } from '../../src/core/anonymizer/index.js';
 import { createLogger } from '../../src/core/logging/index.js';
+import { createFakeAzureAccess } from './azure.js';
 import type { ToolContext } from '../../src/core/mcp/index.js';
 
 export function createTestToolContext(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
     pseudonymizer: new Pseudonymizer(),
     logger: createLogger('error', () => undefined),
+    azure: createFakeAzureAccess(),
     ...overrides,
   };
 }
@@ -35,3 +37,5 @@ export function expectNoLeak(output: unknown): void {
     expect(text, `leak detected: ${label}`).not.toMatch(pattern);
   }
 }
+
+export * from './azure.js';
