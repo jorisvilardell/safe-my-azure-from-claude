@@ -1,0 +1,17 @@
+# Copy to config/contexts.yaml (gitignored) and fill with your tenants.
+# The AI only ever sees the ALIASES (keys), never the IDs.
+contexts:
+  prod:
+    tenantId: 00000000-0000-0000-0000-0000000000aa
+    subscriptions:
+      prod-app: 00000000-0000-0000-0000-000000000001
+      prod-network: 00000000-0000-0000-0000-000000000002
+  lab:
+    tenantId: 00000000-0000-0000-0000-0000000000bb
+    subscriptions:
+      lab: 00000000-0000-0000-0000-000000000003
+
+# Tag keys whose values may be shown to the AI. All other tag values are masked.
+safeTagKeys:
+  - env
+  - app
