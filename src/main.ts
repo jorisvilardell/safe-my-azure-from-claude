@@ -2,7 +2,14 @@ import { readFileSync } from 'node:fs';
 import { buildFeatures } from './app/features.js';
 import { startHttpServer } from './app/server.js';
 import { Pseudonymizer } from './core/anonymizer/index.js';
+import {
+  createAzureAccess,
+  createContextStore,
+  type CredentialProvider,
+  type ResourceResolver,
+} from './core/azure/index.js';
 import { loadContexts, loadEnv } from './core/config/index.js';
+import { AppError } from './core/errors/index.js';
 import { createLogger } from './core/logging/index.js';
 
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
@@ -21,7 +28,24 @@ async function main(): Promise<void> {
     for (const [subAlias, subId] of Object.entries(c.subscriptions)) aliases.set(subId, subAlias);
   }
 
-  const ctx = { pseudonymizer: new Pseudonymizer(aliases), logger };
+  // Placeholders until device-code login (#2) and the Resource Graph resolver (#3) land.
+  const credentials: CredentialProvider = {
+    isLoggedIn: () => false,
+    getCredential: (alias) => {
+      throw new AppError('NotLoggedIn', `Context "${alias}" is not logged in. Login is not available yet.`);
+    },
+  };
+  const resolver: ResourceResolver = {
+    resolve: () =>
+      Promise.reject(new AppError('NotImplemented', 'Resource resolution is not available yet.')),
+  };
+  const store = createContextStore({
+    contexts: contexts.contexts,
+    isLoggedIn: (alias) => credentials.isLoggedIn(alias),
+  });
+  const azure = createAzureAccess({ contexts: contexts.contexts, store, credentials, resolver });
+
+  const ctx = { pseudonymizer: new Pseudonymizer(aliases), logger, azure };
   const features = buildFeatures({ version });
 
   logger.info('starting', {
