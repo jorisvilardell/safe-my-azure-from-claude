@@ -71,9 +71,14 @@ export interface LoginPageState {
   readonly loggedIn: readonly { readonly alias: string; readonly expiresOn?: number }[];
 }
 
+/** `logout` also covers a session that expired (the refresh token is no longer valid). */
+export type SessionChange = 'login' | 'logout';
+
 export interface CredentialManager extends CredentialProvider, LoginController {
   /** For the /login page only. */
   loginPageState(): LoginPageState;
+  /** Called after a context logs in or out, e.g. to build or drop its inventory index. */
+  onSessionChange(listener: (alias: string, change: SessionChange) => void): void;
 }
 
 export interface CredentialManagerDeps {
@@ -100,6 +105,18 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
   const factory = deps.factory ?? createDeviceCodeCredential;
   const now = deps.now ?? Date.now;
   const entries = new Map<string, Entry>();
+  const listeners: ((alias: string, change: SessionChange) => void)[] = [];
+
+  const emit = (alias: string, change: SessionChange): void => {
+    for (const listener of listeners) {
+      try {
+        listener(alias, change);
+      } catch {
+        // A listener must never break a login or a logout.
+        deps.logger.warn('session listener failed', { context: alias });
+      }
+    }
+  };
 
   const tenantOf = (alias: string): string => {
     const ctx = Object.hasOwn(deps.contexts, alias) ? deps.contexts[alias] : undefined;
@@ -145,7 +162,10 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
             return token;
           } catch (err) {
             if (!isAuthRequired(err)) throw err;
-            if (isCurrent(alias, entry)) entry.loggedIn = false;
+            if (isCurrent(alias, entry) && entry.loggedIn) {
+              entry.loggedIn = false;
+              emit(alias, 'logout');
+            }
             throw new AppError(
               'NotLoggedIn',
               `The session for context "${alias}" has expired. Run the login tool again.`,
@@ -165,6 +185,7 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
       entry.loggedIn = true;
       entry.pending = undefined;
       deps.logger.info('login succeeded', { context: alias });
+      emit(alias, 'login');
     } catch {
       // The SDK error is dropped on purpose: it may echo the device-code response.
       if (!isCurrent(alias, entry)) return;
@@ -217,6 +238,11 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
       entries.delete(alias);
       entry.abort.abort();
       deps.logger.info('logged out', { context: alias });
+      emit(alias, 'logout');
+    },
+
+    onSessionChange(listener) {
+      listeners.push(listener);
     },
 
     status(alias) {

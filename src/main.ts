@@ -37,12 +37,21 @@ async function main(): Promise<void> {
     isLoggedIn: (alias) => credentials.isLoggedIn(alias),
     ...(contexts.defaultContext === undefined ? {} : { initialActive: contexts.defaultContext }),
   });
-  const azure = createAzureAccess({ contexts: contexts.contexts, store, credentials });
-
-  // Built after `azure`: the index looks our own public IPs up through its Resource Graph client.
-  const publicIpIndex = createPublicIpIndex(azure.resourceGraph, {
-    contextAlias: () => store.list().find((c) => c.active)?.alias,
+  const azure = createAzureAccess({
+    contexts: contexts.contexts,
+    store,
+    credentials,
+    inventory: { maxResources: env.INVENTORY_MAX_RESOURCES },
+    logger,
   });
+  // The inventory index is memory only (#33): built right after login, dropped on logout.
+  credentials.onSessionChange((alias, change) => {
+    if (change === 'logout') azure.inventory.drop(alias);
+    else void azure.inventory.refresh(alias);
+  });
+
+  // A view over the inventory snapshot: our own public IPs are shown by resource name.
+  const publicIpIndex = createPublicIpIndex(azure.inventory);
   const anonymizer = createAnonymizer({ ...anonymizerConfig, publicIpIndex });
   const ctx: ToolContext = { anonymizer, logger, azure };
   const features = buildFeatures({ version, logins: credentials, loginUrl: loginPageUrl(env) });
@@ -51,6 +60,7 @@ async function main(): Promise<void> {
     version,
     contexts: Object.keys(contexts.contexts).length,
     features: features.length,
+    inventoryResource: env.INVENTORY_RESOURCE,
   });
   const server = startHttpServer({
     host: env.HOST,
@@ -59,6 +69,7 @@ async function main(): Promise<void> {
     features,
     ctx,
     logger,
+    inventoryResource: env.INVENTORY_RESOURCE === 'on',
     loginPageState: () => credentials.loginPageState(),
   });
 

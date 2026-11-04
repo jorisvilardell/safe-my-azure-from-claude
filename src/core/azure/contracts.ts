@@ -1,5 +1,6 @@
 import type { TokenCredential } from '@azure/core-auth';
 import type { ClientFactory } from './client-factory.js';
+import type { InventoryIndex } from './inventory-index.js';
 import type { ResourceGraph } from './resource-graph.js';
 
 /**
@@ -74,6 +75,12 @@ export interface AzureAccess {
   readonly resolver: ResourceResolver;
   /** Read-only Resource Graph queries, scoped to the active context's subscriptions. */
   readonly resourceGraph: ResourceGraph;
+  /**
+   * In-memory inventory snapshot of the active context (#33), the single source for the resolver,
+   * the public IP index and the inventory tools. `current()` is `undefined` when it is not fresh:
+   * then query Resource Graph live. Memory only, dropped on logout. Holds ARM IDs: server-side only.
+   */
+  readonly inventory: InventoryIndex;
   /** Per-context cache of Azure SDK clients. Build every SDK client through it. */
   readonly clients: ClientFactory;
 }

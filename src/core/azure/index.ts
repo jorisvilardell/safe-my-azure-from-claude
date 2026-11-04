@@ -12,6 +12,7 @@ export { createAzureAccess, type AzureAccessDeps } from './azure-access.js';
 export { createClientFactory, type ClientFactory } from './client-factory.js';
 export {
   createResourceGraph,
+  createResourceGraphScan,
   kqlString,
   DEFAULT_MAX_ROWS,
   HARD_MAX_ROWS,
@@ -19,16 +20,27 @@ export {
   type ResourceGraph,
   type ResourceGraphDeps,
   type ResourceGraphQueryClient,
+  type ResourceGraphScan,
   type ResourceQueryOptions,
   type ResourceQueryResult,
+  type ResourceScanOptions,
 } from './resource-graph.js';
-export { createResourceResolver, RESOLVER_TTL_MS, type ResolverDeps } from './resolver.js';
 export {
-  createPublicIpIndex,
-  PUBLIC_IP_TTL_MS,
-  type PublicIpIndexOptions,
-  type PublicIpLookup,
-} from './public-ip-index.js';
+  buildInventorySnapshot,
+  createInventoryIndex,
+  DEFAULT_INVENTORY_MAX_RESOURCES,
+  INVENTORY_QUERY,
+  INVENTORY_TTL_MS,
+  type InventoryEntry,
+  type InventoryFilter,
+  type InventoryIndex,
+  type InventoryIndexDeps,
+  type InventoryIndexOptions,
+  type InventorySnapshot,
+  type InventoryStatus,
+} from './inventory-index.js';
+export { createResourceResolver, RESOLVER_TTL_MS, type ResolverDeps } from './resolver.js';
+export { createPublicIpIndex, type PublicIpLookup } from './public-ip-index.js';
 export {
   ARM_SCOPE,
   createCredentialManager,
@@ -43,5 +55,6 @@ export {
   type LoginState,
   type LoginStatus,
   type PendingLogin,
+  type SessionChange,
   type StartLoginResult,
 } from './credential-manager.js';

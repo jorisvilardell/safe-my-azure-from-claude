@@ -90,8 +90,16 @@ mocks ([#37](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/
    - `ctx.azure.resourceGraph.query(kql, { subscriptions?, maxRows? })` → rows; `.queryResult(...)` → `{ rows, truncated }`. Pass `truncated` on to the AI. Put AI input into KQL with `kqlString()` only.
    - `ctx.azure.clients.getClient(session, key, (credential) => new SomeClient(credential, …))`: the shared per-context client cache. The key must identify everything the client is bound to (e.g. `alerts:<subscriptionId>`).
    - `ctx.azure.resolver.resolve({ name, resourceGroup?, subscription?, type? })` → ARM ID, for name-based inputs.
+   - `ctx.azure.inventory.current()` → the active context's in-memory inventory snapshot (resources and
+     resource groups: name, type, resourceGroup, location, subscriptionId, ARM ID, sku, kind, tags, public
+     IPs), or `undefined` when it is not fresh (building, stale, over the `INVENTORY_MAX_RESOURCES` cap, or
+     disabled). Serve name/type/location lookups from `snapshot.find({...})` when it is defined, and fall
+     back to the live Resource Graph query otherwise, with the **same output**. The resolver and the public
+     IP index already do. The snapshot holds ARM IDs and raw tags: map it through the allowlist mapper like
+     a Resource Graph row. It lives **in memory only** (never on disk, a volume or a tmpfs DB), is dropped
+     on logout and gone on restart: never persist, cache or export it anywhere else.
    - `ctx.anonymizer`: `executeTool` scrubs every result with it, so don't scrub by hand. Use `ctx.anonymizer.pseudonymizer.resolve(pseudonym)` to turn a pseudonym the AI sent back (e.g. an alert ref) into the real value. For tags, return them under a `tags` key (masked automatically) or call `maskTags()` from `core/anonymizer`.
-6. Write tests in `__tests__/` with realistic, FAKE payloads that contain GUIDs, ARM IDs, emails, JWTs, and public IPs. Run tools through `executeTool(tool, args, createTestToolContext({ azure }))` and assert that none of them appear in the output (`expectNoLeak()` from `test/helpers`). Stub Azure with `createFakeAzureAccess()`: `resourceGraphRows` / `setResourceGraphRows()` for Resource Graph, `stubClient(key, fake)` for any other SDK client (an unstubbed key throws, so tests never reach the network).
+6. Write tests in `__tests__/` with realistic, FAKE payloads that contain GUIDs, ARM IDs, emails, JWTs, and public IPs. Run tools through `executeTool(tool, args, createTestToolContext({ azure }))` and assert that none of them appear in the output (`expectNoLeak()` from `test/helpers`). Stub Azure with `createFakeAzureAccess()`: `resourceGraphRows` / `setResourceGraphRows()` for Resource Graph, `stubClient(key, fake)` for any other SDK client (an unstubbed key throws, so tests never reach the network). The inventory index is off in the fake unless you pass `inventory: { now, ttlMs, maxResources }`; then it reads the rows served for `INVENTORY_QUERY`. Test both paths if your tool uses it.
 7. Register the feature in `src/app/features.ts`.
 8. Run `npm run check` (lint + typecheck + test + build). It must pass.
 
@@ -136,7 +144,8 @@ expectNoLeak(toolText(result));
 - **R5.** Logs go to **stderr**, through the scrubbing logger. Never log headers, credentials, or full SDK responses.
 - **R6.** KQL: reject management commands (`.show`, `.set`, …), and cap the timespan and row count.
 - **R7.** No real Azure identifiers in the repo. That covers tests, fixtures, docs, and commit messages. Use obviously fake GUIDs (`00000000-0000-0000-0000-000000000001`) and documentation IPs (`203.0.113.0/24`, `198.51.100.0/24`).
-- **R8.** The token cache stays in memory. Never write credentials to disk, a volume, or an env var dump.
+- **R8.** The token cache stays in memory. Never write credentials to disk, a volume, or an env var dump. The same goes for the inventory index (`core/azure/inventory-index.ts`): memory only, dropped on logout.
+- **R8b.** MCP resources (only `azure://inventory/<context>`, opt-in with `INVENTORY_RESOURCE=on`) are registered in `app/` and their content goes through `ctx.anonymizer.scrub()` and `sanitizeError()`, exactly like a tool result.
 - **R9.** Agents working on this repo must **not** run `az login`, `az account get-access-token`, `docker exec`/`docker cp` against a running server container, or read `~/.azure/**`. `.claude/settings.json` enforces this for Claude Code.
 
 When in doubt, choose the option that reveals **less** to the AI.

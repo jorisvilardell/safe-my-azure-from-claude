@@ -6,6 +6,7 @@ import {
   type AzureAccess,
   type ClientFactory,
   type CredentialProvider,
+  type InventoryIndexOptions,
   type ResourceGraphQueryClient,
   type ResourceRef,
   type ResourceResolver,
@@ -81,6 +82,11 @@ export interface FakeAzureAccessOptions {
   readonly resources?: readonly FakeResource[];
   /** What `resourceGraph.query()` returns. Defaults to no rows. See `setResourceGraphRows`. */
   readonly resourceGraphRows?: FakeResourceGraphRows;
+  /**
+   * Turns the REAL in-memory inventory index on, over the fake Resource Graph (pass a clock, a TTL or
+   * a cap). Off by default, so feature tests see exactly the live queries they assert on.
+   */
+  readonly inventory?: InventoryIndexOptions;
 }
 
 export interface FakeAzureAccess extends AzureAccess {
@@ -170,6 +176,8 @@ export function createFakeTokenCredential(token = FAKE_ACCESS_TOKEN): TokenCrede
  *   `ctx.azure.clients.getClient(session, key, create)`. An unstubbed key throws.
  * - Names → IDs: `resolver` is in-memory, over `resources` (default `FAKE_RESOURCES`); `armId(r)`
  *   gives the ID it returns.
+ * - Inventory index: off (`current()` is always `undefined`) unless `inventory: { now, ttlMs, … }`
+ *   is passed; then the real index runs over the fake Resource Graph (`INVENTORY_QUERY`).
  */
 export function createFakeAzureAccess(opts: FakeAzureAccessOptions = {}): FakeAzureAccess {
   const contexts = opts.contexts ?? FAKE_CONTEXTS;
@@ -244,12 +252,23 @@ export function createFakeAzureAccess(opts: FakeAzureAccessOptions = {}): FakeAz
     createFakeResourceGraphClient(() => resourceGraphRows, resourceGraphQueries),
   );
 
-  const access = createAzureAccess({ contexts, store, credentials, clients, resolver });
+  const access = createAzureAccess({
+    contexts,
+    store,
+    credentials,
+    clients,
+    resolver,
+    inventory: opts.inventory ?? false,
+  });
 
   return {
     ...access,
     login: (alias) => loggedIn.add(alias),
-    logout: (alias) => loggedIn.delete(alias),
+    // Like main.ts, where the credential manager's logout drops the context's inventory.
+    logout: (alias) => {
+      loggedIn.delete(alias);
+      access.inventory.drop(alias);
+    },
     armId,
     setResourceGraphRows(rows) {
       resourceGraphRows = rows;

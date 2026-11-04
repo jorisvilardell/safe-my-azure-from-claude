@@ -6,6 +6,7 @@ import type { Express } from 'express';
 import type { LoginPageState } from '../core/azure/index.js';
 import type { Logger } from '../core/logging/index.js';
 import { registerFeatures, type Feature, type ToolContext } from '../core/mcp/index.js';
+import { registerInventoryResource } from './inventory-resource.js';
 import { LOGIN_PAGE_HEADERS, renderLoginPage } from './login-page.js';
 
 export interface HttpServerOptions {
@@ -17,11 +18,16 @@ export interface HttpServerOptions {
   readonly logger: Logger;
   /** Pending device-code logins for the /login page. Server-side only. */
   readonly loginPageState: () => LoginPageState;
+  /** Exposes the `azure://inventory/<context>` MCP resource. Off unless `INVENTORY_RESOURCE=on`. */
+  readonly inventoryResource?: boolean;
 }
 
-export function createMcpServer(opts: Pick<HttpServerOptions, 'version' | 'features' | 'ctx'>): McpServer {
+export function createMcpServer(
+  opts: Pick<HttpServerOptions, 'version' | 'features' | 'ctx' | 'inventoryResource'>,
+): McpServer {
   const server = new McpServer({ name: 'safe-my-azure-from-claude', version: opts.version });
   registerFeatures(server, opts.features, opts.ctx);
+  if (opts.inventoryResource === true) registerInventoryResource(server, opts.ctx);
   return server;
 }
 

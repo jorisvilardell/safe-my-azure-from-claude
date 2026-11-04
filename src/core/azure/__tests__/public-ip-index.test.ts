@@ -1,88 +1,91 @@
-import { describe, expect, it, vi, type Mock } from 'vitest';
-import { createFakeAzureAccess } from '../../../../test/helpers/index.js';
+import { describe, expect, it } from 'vitest';
+import { createFakeAzureAccess, expectNoLeak } from '../../../../test/helpers/index.js';
 import { createAnonymizer } from '../../anonymizer/index.js';
-import { PUBLIC_IP_TTL_MS, createPublicIpIndex, type ResourceGraph } from '../index.js';
+import { createPublicIpIndex, INVENTORY_QUERY, INVENTORY_TTL_MS } from '../index.js';
 
-function setup(rows: unknown[]): {
-  query: Mock<(kql: string) => Promise<unknown[]>>;
-  index: ReturnType<typeof createPublicIpIndex>;
-  clock: { now: number; context: string };
-} {
-  const query = vi.fn<(kql: string) => Promise<unknown[]>>(() => Promise.resolve(rows));
-  const clock = { now: 1_000_000, context: 'prod' };
-  const index = createPublicIpIndex(
-    { query: query as ResourceGraph['query'] },
-    {
-      now: () => clock.now,
-      contextAlias: () => clock.context,
+const SUB_APP = '00000000-0000-0000-0000-000000000001';
+const SUB_LAB = '00000000-0000-0000-0000-000000000003';
+
+const pip = (sub: string, name: string, ipAddress: string): Record<string, unknown> => ({
+  id: `/subscriptions/${sub}/resourceGroups/rg-net/providers/Microsoft.Network/publicIPAddresses/${name}`,
+  name,
+  type: 'microsoft.network/publicipaddresses',
+  resourceGroup: 'rg-net',
+  subscriptionId: sub,
+  location: 'westeurope',
+  ipAddress,
+});
+
+function setup(): { azure: ReturnType<typeof createFakeAzureAccess>; clock: { now: number } } {
+  const clock = { now: 1_000_000 };
+  const azure = createFakeAzureAccess({
+    inventory: { now: () => clock.now },
+    resourceGraphRows: ({ query, subscriptions }) => {
+      if (query !== INVENTORY_QUERY) return [];
+      return subscriptions.includes(SUB_APP)
+        ? [pip(SUB_APP, 'pip-web', '203.0.113.10'), { name: 'pip-bad', ipAddress: 42 }, null]
+        : [pip(SUB_LAB, 'pip-lab', '203.0.113.20')];
     },
-  );
-  return { query, index, clock };
+  });
+  return { azure, clock };
 }
 
-describe('createPublicIpIndex', () => {
-  it('maps public IPs to resource names after a refresh', async () => {
-    const { index, query } = setup([
-      { name: 'pip-web', ipAddress: '203.0.113.10' },
-      { name: 'pip-bad', ipAddress: 42 },
-      null,
-    ]);
+describe('createPublicIpIndex (a view over the inventory snapshot)', () => {
+  it('maps public IPs to resource names, with no query of its own', async () => {
+    const { azure } = setup();
+    const index = createPublicIpIndex(azure.inventory);
     expect(index.lookup('203.0.113.10')).toBeUndefined();
     await index.refresh();
     expect(index.lookup('203.0.113.10')).toBe('pip-web');
     expect(index.lookup('198.51.100.1')).toBeUndefined();
-    expect(String(query.mock.calls[0]?.[0])).toContain("type =~ 'microsoft.network/publicipaddresses'");
+    expect(azure.resourceGraphQueries.map((q) => q.query)).toEqual([INVENTORY_QUERY]);
   });
 
-  it('refreshes in the background once the TTL expires', async () => {
-    const { index, query, clock } = setup([{ name: 'pip-web', ipAddress: '203.0.113.10' }]);
+  it('refreshes the snapshot in the background as it ages', async () => {
+    const { azure, clock } = setup();
+    const index = createPublicIpIndex(azure.inventory);
     await index.refresh();
     index.lookup('203.0.113.10');
-    expect(query).toHaveBeenCalledTimes(1);
+    expect(azure.resourceGraphQueries).toHaveLength(1);
 
-    clock.now += PUBLIC_IP_TTL_MS;
+    clock.now += INVENTORY_TTL_MS * 0.9;
     expect(index.lookup('203.0.113.10')).toBe('pip-web');
-    expect(query).toHaveBeenCalledTimes(2);
+    expect(azure.resourceGraphQueries).toHaveLength(2);
   });
 
-  it('never serves an index built for another context', async () => {
-    const { index, clock } = setup([{ name: 'pip-web', ipAddress: '203.0.113.10' }]);
+  it('never serves the snapshot of another context', async () => {
+    const { azure } = setup();
+    const index = createPublicIpIndex(azure.inventory);
     await index.refresh();
-    clock.context = 'lab';
+    azure.contexts.use('lab');
     expect(index.lookup('203.0.113.10')).toBeUndefined();
   });
 
-  it('swallows background failures and backs off', async () => {
-    const { index, query } = setup([]);
-    query.mockImplementation(() => Promise.reject(new Error('boom')));
+  it('never throws, even when Azure fails or nobody is logged in', async () => {
+    const { azure } = setup();
+    azure.setResourceGraphRows(() => {
+      throw new Error('boom /subscriptions/00000000-0000-0000-0000-000000000001');
+    });
+    const index = createPublicIpIndex(azure.inventory);
     expect(index.lookup('203.0.113.10')).toBeUndefined();
-    await Promise.resolve();
+    await expect(index.refresh()).resolves.toBeUndefined();
+    azure.logout('prod');
     expect(index.lookup('203.0.113.10')).toBeUndefined();
-    expect(query).toHaveBeenCalledTimes(1);
-    await expect(index.refresh()).rejects.toThrow('boom');
   });
 });
 
 describe('public IP index wired into the anonymizer (as in main.ts)', () => {
   it('shows our own public IPs by resource name, per active context, and masks the rest', async () => {
-    const azure = createFakeAzureAccess({
-      resourceGraphRows: ({ subscriptions }) =>
-        subscriptions.includes(azure.session().subscriptionId('prod-app'))
-          ? [{ name: 'pip-web', ipAddress: '203.0.113.10' }]
-          : [],
-    });
-    const index = createPublicIpIndex(azure.resourceGraph, {
-      contextAlias: () => azure.contexts.list().find((c) => c.active)?.alias,
-    });
+    const { azure } = setup();
+    const index = createPublicIpIndex(azure.inventory);
     const anonymizer = createAnonymizer({ publicIpIndex: index });
 
-    // First sight starts a background refresh: until it lands, the IP is masked.
+    // First sight starts a background build: until it lands, the IP is masked.
     expect(anonymizer.scrubString('from 203.0.113.10')).toBe('from public-ip-external-001');
     await index.refresh();
-    expect(anonymizer.scrubString('from 203.0.113.10 and 198.51.100.7')).toBe(
-      'from public-ip-pip-web and public-ip-external-002',
-    );
-    expect(azure.resourceGraphQueries[0]?.query).toMatch(/publicipaddresses/);
+    const out = anonymizer.scrubString('from 203.0.113.10 and 198.51.100.7');
+    expect(out).toBe('from public-ip-pip-web and public-ip-external-002');
+    expectNoLeak(out);
 
     azure.contexts.use('lab');
     expect(anonymizer.scrubString('from 203.0.113.10')).toBe('from public-ip-external-001');

@@ -147,7 +147,14 @@ describe('createAzureAccess', () => {
       },
     };
     clients.stub(RESOURCE_GRAPH_CLIENT_KEY, fakeClient);
-    const azure = createAzureAccess({ contexts: FAKE_CONTEXTS, store, credentials, clients });
+    // Index off: this test counts the live queries (the index has its own tests).
+    const azure = createAzureAccess({
+      contexts: FAKE_CONTEXTS,
+      store,
+      credentials,
+      clients,
+      inventory: false,
+    });
 
     expect(azure.clients).toBe(clients);
     // The default resolver goes through the shared Resource Graph client.

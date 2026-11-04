@@ -35,3 +35,19 @@ describe('loginPageUrl', () => {
     expect(() => loadEnv({ PUBLIC_URL: 'ftp://x' })).toThrow();
   });
 });
+
+describe('inventory settings', () => {
+  it('caps the index at 50,000 resources and keeps the MCP resource off by default', () => {
+    const env = loadEnv({});
+    expect(env.INVENTORY_MAX_RESOURCES).toBe(50_000);
+    expect(env.INVENTORY_RESOURCE).toBe('off');
+  });
+
+  it('accepts an explicit opt-in and a custom cap (0 disables the index)', () => {
+    const env = loadEnv({ INVENTORY_RESOURCE: 'on', INVENTORY_MAX_RESOURCES: '0' });
+    expect(env.INVENTORY_RESOURCE).toBe('on');
+    expect(env.INVENTORY_MAX_RESOURCES).toBe(0);
+    expect(() => loadEnv({ INVENTORY_RESOURCE: 'yes' })).toThrow();
+    expect(() => loadEnv({ INVENTORY_MAX_RESOURCES: '-1' })).toThrow();
+  });
+});
