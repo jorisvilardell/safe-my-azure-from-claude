@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+
+# Real tenant/subscription mapping — NEVER commit (see AGENTS.md R7)
+config/contexts.yaml
+
+# Claude Code local overrides
+.claude/settings.local.json

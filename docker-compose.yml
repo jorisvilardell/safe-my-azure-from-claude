@@ -1,0 +1,21 @@
+services:
+  azure-safe-mcp:
+    build: .
+    image: safe-my-azure-from-claude:local
+    container_name: azure-safe-mcp
+    restart: unless-stopped
+    ports:
+      # Loopback only — never expose on the LAN.
+      - '127.0.0.1:8765:8765'
+    volumes:
+      # Read-only tenant/subscription alias map. No credentials in it.
+      - ./config/contexts.yaml:/app/config/contexts.yaml:ro
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    # Hardening: tokens live in process memory only (AGENTS.md R8).
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true

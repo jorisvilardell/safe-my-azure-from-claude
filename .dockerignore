@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+.git
+.github
+.claude
+config/contexts.yaml
+.env
+*.md
+!README.md
