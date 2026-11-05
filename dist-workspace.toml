@@ -24,6 +24,8 @@ targets = [
 # Ship the axoupdater-based `safe-azure-update` binary and an install receipt with the
 # shell/powershell installers; `safe-azure update` relies on the receipt.
 install-updater = true
+# Swatinem/rust-cache in every build job (target/ and the cargo registry), keyed per target.
+cache-builds = true
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # The npm package is `safe-azure`, so `npx safe-azure` works (needs the NPM_TOKEN secret)
@@ -42,4 +44,4 @@ aarch64-pc-windows-msvc = "windows-11-arm"
 
 [dist.github-custom-job-permissions]
 release-version-check = { contents = "read" }
-release-image = { contents = "read", packages = "write" }
+release-image = { contents = "read", packages = "write", security-events = "write" }
