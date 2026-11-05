@@ -53,6 +53,13 @@ enum Command {
 
 fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
+    // `mcp` and `hook` must stay silent and fast; `update` and `doctor` check releases themselves.
+    if !matches!(
+        cli.command,
+        Command::Mcp | Command::Hook(_) | Command::Update(_) | Command::Doctor
+    ) {
+        commands::install::notify_update_available();
+    }
     let result = match cli.command {
         Command::Install(args) => commands::install::install(&args),
         Command::Uninstall(args) => commands::install::uninstall(&args),
