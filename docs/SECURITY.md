@@ -1,5 +1,11 @@
 # Security and threat model
 
+> **Reporting a vulnerability.** Please do not open a public issue. Report it privately through
+> GitHub: the repository's **Security** tab → **Report a vulnerability**
+> ([direct link](https://github.com/jorisvilardell/safe-my-azure-from-claude/security/advisories/new)).
+> Never paste real tokens or Azure identifiers in a report: reproduce with fake ones. Details in
+> [§9](#9-reporting-a-vulnerability).
+
 This document says what **safe-my-azure-from-claude** protects, how, and where its protection ends.
 It describes the code as it is on `main`. Planned work is marked as planned, with a link to its issue.
 

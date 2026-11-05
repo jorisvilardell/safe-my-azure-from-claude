@@ -3,11 +3,11 @@
 The server speaks **MCP over Streamable HTTP** at `http://127.0.0.1:8765/mcp`, in stateless mode,
 on the loopback interface only. Every request needs `Authorization: Bearer <mcp key>`; the key is
 random, changes on every container restart and lives only in the container
-([USAGE.md §3](./USAGE.md#3-start-the-server)). Start the server first.
+([USAGE.md §6](./USAGE.md#6-the-server)). Start the server first: `safe-azure install`
+([USAGE.md §1](./USAGE.md#1-getting-started)) sets it up, and `safe-azure up` starts it again.
 
 **The recommended way for every client is the `safe-azure mcp` stdio bridge**, which comes with the
-`safe-azure` CLI (see [#60](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/60)–[#63](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/63)).
-It reads the key itself, re-reads it after a restart, and adds the header: no key is ever written
+`safe-azure` CLI. It reads the key itself, re-reads it after a restart, and adds the header: no key is ever written
 to a client config file. Register it as a **stdio** server with the command `safe-azure` and the
 argument `mcp`.
 
