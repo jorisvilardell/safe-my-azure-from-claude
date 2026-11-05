@@ -249,6 +249,11 @@ Why this design:
   steal (a persisted, encrypted cache is discussed in
   [#14](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/14)).
 - `logout` drops the credential object of a context.
+- **Native Windows mode** (`AUTH_MODE=broker`, optional, [WINDOWS.md](./WINDOWS.md)) swaps the
+  device code for a WAM sign-in window and Docker for a plain Node process. That process runs as
+  the same user as Claude Code, so the Docker argument above no longer holds: the keys file,
+  `contexts.yaml` and the process memory are reachable from the AI's shell, and the deny rules and
+  the guard (§7) become **mandatory**, not defence in depth. The default stays `device-code`.
 
 ### Server keys
 

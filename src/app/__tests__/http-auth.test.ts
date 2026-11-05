@@ -7,6 +7,7 @@ import {
   FAKE_USER_CODE,
   FAKE_VERIFICATION_URI,
   createLoginRig,
+  createStubLogin,
   expectNoLeak,
   flushLogin,
 } from '../../../test/helpers/index.js';
@@ -267,6 +268,30 @@ describe('/admin API', () => {
     const res = await admin('POST', '/login', { context: 'prod' });
     expect(res.status).toBe(504);
     expect(await res.json()).toMatchObject({ error: { code: 'LoginTimeout' } });
+  });
+
+  it('POST /admin/login in broker mode answers 202 at once, with no code, then reports the state', async () => {
+    const stub = createStubLogin();
+    const broker = createCredentialManager({
+      contexts: FAKE_CONTEXTS,
+      logger: createLogger('error', { write: () => undefined }),
+      authMode: 'broker',
+      factory: stub.factory,
+    });
+    // A long code timeout: broker mode must not wait for a code that never comes.
+    const { admin } = await start({ logins: broker, codeTimeoutMs: 60_000 });
+    const res = await admin('POST', '/login', { context: 'prod' });
+    expect(res.status).toBe(202);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ context: 'prod', authMode: 'broker', expiresAt: expect.any(String) as unknown });
+    expect(JSON.stringify(body)).not.toContain(FAKE_USER_CODE);
+    expect(await (await admin('GET', '/login/prod')).json()).toEqual({ context: 'prod', state: 'pending' });
+
+    stub.approve();
+    await flushLogin();
+    expect(await (await admin('GET', '/login/prod')).json()).toEqual({ context: 'prod', state: 'succeeded' });
+    expect((await admin('POST', '/login', { context: 'prod' })).status).toBe(409);
   });
 
   it('POST /admin/logout and /admin/use act on the context', async () => {

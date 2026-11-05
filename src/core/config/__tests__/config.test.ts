@@ -46,6 +46,18 @@ describe('inventory settings', () => {
   });
 });
 
+describe('AUTH_MODE', () => {
+  it('defaults to device-code, accepts broker, rejects anything else', () => {
+    expect(loadEnv({}).AUTH_MODE).toBe('device-code');
+    expect(loadEnv({ AUTH_MODE: '' }).AUTH_MODE).toBe('device-code');
+    expect(loadEnv({ AUTH_MODE: 'device-code' }).AUTH_MODE).toBe('device-code');
+    expect(loadEnv({ AUTH_MODE: 'broker' }).AUTH_MODE).toBe('broker');
+    for (const AUTH_MODE of ['wam', 'Broker', 'interactive']) {
+      expect(() => loadEnv({ AUTH_MODE })).toThrow();
+    }
+  });
+});
+
 describe('AUDIT_LOG', () => {
   it('defaults to stderr, with no file', () => {
     const env = loadEnv({});

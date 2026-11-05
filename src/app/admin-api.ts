@@ -8,7 +8,8 @@ import type { Logger } from '../core/logging/index.js';
  * `/admin/*` (ADR 0001 §2): the human CLI's API. Not AI-facing, so no anonymizer, but:
  * - every route needs `Authorization: Bearer <admin key>` (see `requireBearer`);
  * - every response is `Cache-Control: no-store`;
- * - the user code is returned by `POST /admin/login` only, and never logged.
+ * - the user code is returned by `POST /admin/login` only, and never logged. In broker mode
+ *   (AUTH_MODE=broker) there is no code: `POST /admin/login` answers 202 and WAM shows its window.
  */
 
 export interface AdminApiDeps {
@@ -123,6 +124,16 @@ export function createAdminRouter(deps: AdminApiDeps): Router {
       if (alias === undefined) return;
       if (deps.logins.startLogin(alias) === 'already-logged-in') {
         sendError(res, 409, 'AlreadyLoggedIn', `Context "${alias}" is already logged in.`);
+        return;
+      }
+      if (deps.logins.authMode === 'broker') {
+        // No code: the WAM window is open on this desktop. The caller polls GET /admin/login/:context.
+        const expiresOn = deps.logins.pendingLogin(alias)?.expiresOn;
+        res.status(202).json({
+          context: alias,
+          authMode: 'broker',
+          ...(expiresOn === undefined ? {} : { expiresAt: new Date(expiresOn).toISOString() }),
+        });
         return;
       }
       const pending = await deps.logins.waitForDeviceCode(alias, codeTimeoutMs);
