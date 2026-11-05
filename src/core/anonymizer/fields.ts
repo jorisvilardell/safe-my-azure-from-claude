@@ -78,8 +78,40 @@ export const isSecretKey = (key: string): boolean => SECRET_KEY.test(key);
 export const isNonSecretObjectKey = (nk: string): boolean => NON_SECRET_OBJECT_KEYS.has(nk);
 export const isAppIdKey = (nk: string): boolean => APP_ID_KEYS.has(nk);
 export const isTagsKey = (nk: string): boolean => nk === 'tags';
-/** `osVersion`, `agentVersion`, `typeHandlerVersion`: their dotted values are not IPs. */
-export const isVersionKey = (nk: string): boolean => nk.endsWith('version');
+/**
+ * Known Azure version fields, whose dotted values (`1.10.2.0`) are not IPs. An exact list, not
+ * a `*version` suffix: data keys (dynamic KQL columns, metric dimensions) could otherwise be
+ * named `xversion` on purpose to get a public IP through unmasked.
+ */
+const VERSION_KEYS = new Set([
+  'version',
+  'osversion',
+  'agentversion',
+  'typehandlerversion',
+  'kubernetesversion',
+  'currentkubernetesversion',
+  'orchestratorversion',
+  'imageversion',
+  'nodeimageversion',
+  'minimumtlsversion',
+  'minimaltlsversion',
+  'mintlsversion',
+  'tlsversion',
+  'apiversion',
+  'schemaversion',
+  'contentversion',
+  'sdkversion',
+  'runtimeversion',
+  'platformversion',
+  'extensionversion',
+  'appversion',
+  'frameworkversion',
+  'engineversion',
+  'serverversion',
+  'majorversion',
+  'minorversion',
+]);
+export const isVersionKey = (nk: string): boolean => VERSION_KEYS.has(nk);
 
 export function isUserKey(nk: string, inIdentity: boolean): boolean {
   return USER_KEYS.has(nk) || (inIdentity && USER_KEYS_IN_IDENTITY.has(nk));

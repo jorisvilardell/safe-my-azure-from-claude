@@ -16,6 +16,8 @@ identifier and is read-only. A guard hook blocks the other routes, so don't try 
    PowerShell (`Get-AzAccessToken`, `Connect-AzAccount`…), `curl`/`Invoke-WebRequest`/`WebFetch`
    to `127.0.0.1:8765`, `docker exec`/`logs`/`inspect` on the `azure-safe-mcp` container, and
    never read `~/.azure`, the safe-azure config directory, `keys.bin` or `contexts.yaml`.
+   **PowerShell is blocked entirely** (the PowerShell tool, `powershell` and `pwsh`): use the
+   Bash tool for shell work.
 2. **Login is the user's job.** When a tool says the context is not logged in, ask the user to run
    `safe-azure login <context>` in their own terminal, then call `login_status`. Never run
    `safe-azure login`, `keys`, `install`, `update` or `down` yourself.

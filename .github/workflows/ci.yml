@@ -76,11 +76,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Reject non-fake GUIDs and JWTs
+      - name: Reject non-fake GUIDs
         run: |
           # Fake GUIDs must start with 00000000- or be the documented test GUID (AGENTS.md R7).
-          hits=$(git grep -nIE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' -- . ':!package-lock.json' \
-            | grep -vE '00000000-0000-0000-0000-[0-9a-fA-F]{12}|11111111-2222-3333-4444-555555555555' || true)
+          # `-o` checks every GUID on its own: filtering whole lines let a real GUID through when a
+          # fake one sat on the same line.
+          hits=$(git grep -nIoE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' -- . ':!package-lock.json' \
+            | grep -vE ':(00000000-0000-0000-0000-[0-9a-fA-F]{12}|11111111-2222-3333-4444-555555555555)$' || true)
           if [ -n "$hits" ]; then echo "::error::Possible real Azure identifier committed:"; echo "$hits"; exit 1; fi
 
   docker:

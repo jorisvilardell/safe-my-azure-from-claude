@@ -18,6 +18,8 @@ pub enum Decision {
 pub struct Env {
     pub home: Option<String>,
     pub config_dir: Option<String>,
+    /// This hook's own executable: deleting or replacing it would disable the guard.
+    pub exe: Option<String>,
 }
 
 impl Env {
@@ -25,6 +27,9 @@ impl Env {
         Self {
             home: dirs::home_dir().map(|p| norm(&p.to_string_lossy())),
             config_dir: crate::paths::config_dir().map(|p| norm(&p.to_string_lossy())),
+            exe: std::env::current_exe()
+                .ok()
+                .map(|p| norm(&p.to_string_lossy())),
         }
     }
 }
@@ -32,6 +37,10 @@ impl Env {
 const PREFIX: &str = "safe-azure guard:";
 const USE_MCP: &str = "Use the safe-azure MCP tools instead (server_info, login_status, \
     list_fired_alerts, get_alert, get_activity_log, get_metrics, run_kql, get_resource_health).";
+
+const POWERSHELL: &str = "PowerShell is blocked while safe-azure guards this machine: it is too \
+    powerful to inspect (.NET, the registry, DPAPI, Azure modules). Use the Bash tool for shell \
+    work, and the safe-azure MCP tools for Azure.";
 
 const MALFORMED: &str = "the hook input is not valid PreToolUse JSON, so the call is blocked \
     (fail closed). Retry the tool call; if this keeps happening, ask the user to run \
@@ -62,7 +71,10 @@ pub fn evaluate(raw: &str, env: &Env) -> Decision {
     let cwd = event.get("cwd").and_then(Value::as_str);
 
     match tool {
-        "Bash" | "PowerShell" => match text("command") {
+        // PowerShell is refused as a whole: it reaches .NET, the registry, DPAPI and every
+        // Azure module directly, so no word list can guard it.
+        "PowerShell" => deny(POWERSHELL),
+        "Bash" => match text("command") {
             Some(cmd) => check_command(cmd, env),
             None => deny_shape(tool, "command"),
         },
@@ -210,6 +222,10 @@ fn is_config_dir_ref(text: &str, env: &Env) -> bool {
         if !dir.is_empty() && text.contains(dir) {
             return true;
         }
+        // Drive-relative form (`\Users\me\AppData\Roaming\safe-azure`).
+        if dir.get(1..3) == Some(":/") && dir.len() > 3 && text.contains(&dir[2..]) {
+            return true;
+        }
     }
     if text.match_indices("safe-azure").any(|(i, _)| {
         let head = &text[..i];
@@ -237,10 +253,262 @@ fn check_path(path: &str, write: bool, env: &Env) -> Decision {
     if let Some(reason) = sensitive_location(&p, env) {
         return deny(reason);
     }
+    if let Some(reason) = disguised_location(&p, true) {
+        return deny(reason);
+    }
     if write && (is_claude_settings(&p) || p.contains(".claude/skills/safe-azure")) {
         return deny(format!("blocked writing `{path}`: {SETTINGS}"));
     }
+    if write && is_own_binary(&p, env) {
+        return deny(format!("blocked writing `{path}`: {OWN_BINARY}"));
+    }
     Decision::Allow
+}
+
+const OWN_BINARY: &str = "it is the safe-azure binary that runs this guard: replacing or \
+    deleting it would turn the guard off (self-protection). Ask the user to update safe-azure \
+    themselves (`safe-azure update`).";
+const DISGUISED: &str = "the path is written so that the guard cannot read it (a wildcard or a \
+    Windows 8.3 short name that can match a protected file). Write the full, literal path; \
+    protected locations stay blocked.";
+
+/// Executables of the safe-azure CLI (the guard itself and its updater).
+const OWN_BINARIES: [&str; 2] = ["safe-azure", "safe-azure-update"];
+
+/// File and directory names the guard protects, matched against wildcards and 8.3 short names.
+const SENSITIVE_NAMES: [&str; 13] = [
+    ".azure",
+    ".identityservice",
+    "safe-azure",
+    "keys.bin",
+    "contexts.yaml",
+    "msal_token_cache.json",
+    "msal_token_cache.bin",
+    "msal_http_cache.bin",
+    "msal.cache",
+    "azureprofile.json",
+    "accesstokens.json",
+    "service_principal_entries.json",
+    "tokencache.dat",
+];
+/// Parents whose `*` would cover a protected entry (`~/.config/*`, `roaming/*`, `config/*.yaml`).
+const SENSITIVE_PARENTS: [&str; 8] = [
+    ".azure",
+    ".identityservice",
+    "safe-azure",
+    "config",
+    ".config",
+    "roaming",
+    "appdata",
+    "application support",
+];
+
+/// `p` (normalised) names this guard's executable.
+fn is_own_binary(p: &str, env: &Env) -> bool {
+    if env.exe.as_deref().is_some_and(|e| !e.is_empty() && p == e) {
+        return true;
+    }
+    let base = p.rsplit('/').next().unwrap_or(p);
+    let base = base.strip_suffix(".exe").unwrap_or(base);
+    OWN_BINARIES.contains(&base)
+}
+
+enum GlobTok {
+    Star,
+    One,
+    Lit(char),
+    Set(bool, Vec<(char, char)>),
+}
+
+fn glob_tokens(pattern: &str) -> Vec<GlobTok> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '*' => {
+                if !matches!(out.last(), Some(GlobTok::Star)) {
+                    out.push(GlobTok::Star);
+                }
+            }
+            '?' => out.push(GlobTok::One),
+            '[' => {
+                if let Some(len) = chars[i + 1..].iter().position(|&c| c == ']') {
+                    let mut set = &chars[i + 1..=i + len];
+                    let neg = matches!(set.first(), Some('!' | '^'));
+                    if neg {
+                        set = &set[1..];
+                    }
+                    let mut ranges = Vec::new();
+                    let mut j = 0;
+                    while j < set.len() {
+                        if j + 2 < set.len() && set[j + 1] == '-' {
+                            ranges.push((set[j], set[j + 2]));
+                            j += 3;
+                        } else {
+                            ranges.push((set[j], set[j]));
+                            j += 1;
+                        }
+                    }
+                    out.push(GlobTok::Set(neg, ranges));
+                    i += len + 2;
+                    continue;
+                }
+                out.push(GlobTok::Lit('['));
+            }
+            c => out.push(GlobTok::Lit(c)),
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Shell-style wildcard match (`*`, `?`, `[a-z]`, `[!x]`), linear in both lengths.
+fn glob_match(pattern: &str, name: &str) -> bool {
+    let name: Vec<char> = name.chars().collect();
+    let mut reach = vec![false; name.len() + 1];
+    reach[0] = true;
+    for tok in glob_tokens(pattern) {
+        let mut next = vec![false; name.len() + 1];
+        if let GlobTok::Star = tok {
+            let mut any = false;
+            for (j, slot) in next.iter_mut().enumerate() {
+                any |= reach[j];
+                *slot = any;
+            }
+        } else {
+            for (j, &c) in name.iter().enumerate() {
+                let ok = match &tok {
+                    GlobTok::One => true,
+                    GlobTok::Lit(l) => *l == c,
+                    GlobTok::Set(neg, ranges) => {
+                        ranges.iter().any(|&(a, b)| a <= c && c <= b) != *neg
+                    }
+                    GlobTok::Star => false,
+                };
+                if reach[j] && ok {
+                    next[j + 1] = true;
+                }
+            }
+        }
+        reach = next;
+    }
+    reach[name.len()]
+}
+
+/// `contex~1.yam`, `azure~1`, `sa1b2c~1`: a Windows 8.3 short name that may stand for a
+/// protected entry (the first two characters of a protected name, then `~N`).
+fn is_suspicious_short_name(segment: &str) -> bool {
+    let Some((stem, tail)) = segment.split_once('~') else {
+        return false;
+    };
+    let stem_len = stem.chars().count();
+    if !(1..=6).contains(&stem_len) || stem.contains('.') {
+        return false;
+    }
+    let (digits, ext) = tail.split_once('.').unwrap_or((tail, ""));
+    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) || ext.chars().count() > 3 {
+        return false;
+    }
+    let head: String = stem.chars().take(2).collect();
+    SENSITIVE_NAMES.iter().any(|name| {
+        let squashed: String = name.chars().filter(|c| *c != '.').collect();
+        squashed.starts_with(&head)
+    })
+}
+
+/// A wildcard or an 8.3 short name in `path_like` (normalised) that can reach a protected
+/// entry. `short_names` is off for shell words without a `/`, so `HEAD~1` stays allowed.
+fn disguised_location(path_like: &str, short_names: bool) -> Option<String> {
+    let mut prev = "";
+    for seg in path_like.split('/') {
+        if seg.contains(['*', '?', '[']) {
+            let literal_head = seg
+                .chars()
+                .take_while(|c| !matches!(c, '*' | '?' | '['))
+                .count();
+            let hits = SENSITIVE_NAMES.iter().any(|name| glob_match(seg, name));
+            if hits && (literal_head >= 2 || SENSITIVE_PARENTS.contains(&prev)) {
+                return Some(format!("blocked `{path_like}`: {DISGUISED} {USE_MCP}"));
+            }
+        }
+        if short_names && is_suspicious_short_name(seg) {
+            return Some(format!("blocked `{path_like}`: {DISGUISED} {USE_MCP}"));
+        }
+        prev = seg;
+    }
+    None
+}
+
+/// Shell words of `text`, split the way a shell would before expanding wildcards.
+fn shell_words(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                ';' | '&' | '|' | '(' | ')' | '{' | '}' | '`' | ',' | '<' | '>' | '=' | '"' | '\''
+            )
+    })
+    .filter(|t| !t.is_empty())
+}
+
+/// Commands that delete, move, overwrite or change the permissions of a file.
+const MUTATORS: [&str; 41] = [
+    "rm",
+    "del",
+    "erase",
+    "rmdir",
+    "rd",
+    "unlink",
+    "shred",
+    "remove-item",
+    "ri",
+    "mv",
+    "move",
+    "move-item",
+    "mi",
+    "cp",
+    "copy",
+    "copy-item",
+    "cpi",
+    "xcopy",
+    "robocopy",
+    "ren",
+    "rename",
+    "rename-item",
+    "rni",
+    "set-content",
+    "sc",
+    "add-content",
+    "ac",
+    "out-file",
+    "new-item",
+    "ni",
+    "tee",
+    "tee-object",
+    "truncate",
+    "dd",
+    "install",
+    "ln",
+    "chmod",
+    "chown",
+    "icacls",
+    "takeown",
+    "attrib",
+];
+
+/// A shell segment that deletes, moves or overwrites this guard's executable.
+fn touches_own_binary(text: &str, env: &Env) -> bool {
+    text.split(['\n', '\r', ';', '&', '|', '(', ')', '{', '}', '`'])
+        .any(|seg| {
+            let words: Vec<&str> = seg.split_whitespace().collect();
+            let names: Vec<String> = words.iter().map(|w| program_name(w)).collect();
+            let target = words.iter().zip(&names).skip(1).any(|(w, name)| {
+                OWN_BINARIES.contains(&name.as_str())
+                    || (w.contains('/') && is_own_binary(&norm(w), env))
+            });
+            target && (seg.contains('>') || names.iter().any(|n| MUTATORS.contains(&n.as_str())))
+        })
 }
 
 /// Absolute, normalised form of a path, resolved against `cwd` and `~`.
@@ -266,6 +534,10 @@ fn absolute(path: &str, cwd: Option<&str>, env: &Env) -> Option<String> {
         && bytes[2] == b'/'
     {
         format!("{}:{}", char::from(bytes[1]), &p[2..])
+    } else if drive_host && p.starts_with('/') {
+        // `\Users\me` is relative to the current drive: assume the home drive.
+        let drive = env.home.as_deref().and_then(|h| h.get(..2)).unwrap_or("c:");
+        format!("{drive}{p}")
     } else {
         p
     };
@@ -374,8 +646,15 @@ fn is_loopback_host(host_port: &str) -> bool {
 
 /// Two views of the command: escapes as path separators, and escapes removed.
 fn variants(cmd: &str) -> [String; 2] {
+    // Dashes typed as en/em dashes still start a flag for some shells: treat them as `-`.
     let lower = cmd
         .to_lowercase()
+        .replace(
+            [
+                '\u{2010}', '\u{2011}', '\u{2012}', '\u{2013}', '\u{2014}', '\u{2015}', '\u{2212}',
+            ],
+            "-",
+        )
         .replace("\\\r\n", " ")
         .replace("\\\n", " ")
         .replace("`\r\n", " ")
@@ -483,9 +762,73 @@ const DOCKER_TOOLS: [&str; 5] = [
     "podman-compose",
     "nerdctl",
 ];
-const DOCKER_SUBS: [&str; 10] = [
-    "exec", "cp", "inspect", "logs", "attach", "export", "commit", "diff", "top", "debug",
+const DOCKER_SUBS: [&str; 11] = [
+    "exec",
+    "cp",
+    "inspect",
+    "logs",
+    "attach",
+    "export",
+    "commit",
+    "diff",
+    "top",
+    "debug",
+    "checkpoint",
 ];
+
+/// `docker run`/`create` options that reach into another container (its processes, memory,
+/// files or network) or into the Docker host, whatever the target is called.
+fn reaches_other_container(rest: &[String]) -> bool {
+    const NAMESPACE_FLAGS: [&str; 7] = [
+        "--pid",
+        "--ipc",
+        "--network",
+        "--net",
+        "--uts",
+        "--userns",
+        "--cgroupns",
+    ];
+    let shares = rest.iter().enumerate().any(|(i, t)| {
+        let next = rest.get(i + 1).map_or("", String::as_str);
+        t.contains("container:")
+            || t.contains("docker.sock")
+            || t.contains("podman.sock")
+            || t.starts_with("--privileged")
+            || t.starts_with("--volumes-from")
+            || t.contains("sys_ptrace")
+            || t.contains("sys_admin")
+            || NAMESPACE_FLAGS
+                .iter()
+                .any(|f| *t == format!("{f}=host") || (t == f && next == "host"))
+            || (t == "--cap-add" && next == "all")
+            || t == "--cap-add=all"
+    });
+    let signals = rest.iter().any(|t| t == "kill")
+        && rest
+            .iter()
+            .any(|t| t == "-s" || t.starts_with("--signal") || t.contains("usr1"));
+    shares || signals
+}
+
+/// `docker run -v /:/host`, `--mount type=bind,source=/,…`: the Docker host's root filesystem.
+/// Checked on raw words, since the token view keeps only the last path segment.
+fn mounts_host_root(text: &str) -> bool {
+    text.split(['\n', '\r', ';', '&', '|', '(', ')', '{', '}', '`'])
+        .any(|seg| {
+            let words: Vec<&str> = seg.split_whitespace().collect();
+            words
+                .iter()
+                .any(|w| DOCKER_TOOLS.contains(&program_name(w).as_str()))
+                && words.iter().any(|w| {
+                    w.starts_with("/:")
+                        || w.contains("source=/,")
+                        || w.contains("src=/,")
+                        || w.ends_with("source=/")
+                        || w.ends_with("src=/")
+                })
+        })
+}
+
 const SHELLS: [&str; 14] = [
     "sh",
     "bash",
@@ -511,6 +854,22 @@ fn check_command(cmd: &str, env: &Env) -> Decision {
         if is_claude_settings(&text) || text.contains(".claude/skills/safe-azure") {
             return deny(format!(
                 "blocked a shell command that touches Claude Code settings: {SETTINGS}"
+            ));
+        }
+        for word in shell_words(&text) {
+            if let Some(reason) = disguised_location(word, word.contains('/')) {
+                return deny(reason);
+            }
+        }
+        if mounts_host_root(&text) {
+            return deny(format!(
+                "mounting the Docker host's root filesystem is blocked: it reaches the server's \
+                 keys. {USE_MCP}"
+            ));
+        }
+        if touches_own_binary(&text, env) {
+            return deny(format!(
+                "blocked a command that modifies safe-azure: {OWN_BINARY}"
             ));
         }
         let segs: Vec<Vec<String>> = segments(&text).collect();
@@ -569,24 +928,31 @@ fn check_tokens(tokens: &[String]) -> Option<String> {
                      <context>` in their own terminal."
                 ));
             }
+            "cargo" if cargo_replaces_guard(rest) => {
+                return Some(format!(
+                    "this `cargo` command installs or removes a safe-azure binary, which runs the \
+                     guard. {OWN_BINARY}"
+                ));
+            }
             "azd" if next_word(rest) == Some("auth") => {
                 return Some(format!(
                     "`azd auth` handles Azure tokens and is blocked. {USE_MCP}"
                 ));
             }
-            "powershell" | "pwsh" if rest.iter().any(|f| is_encoded_flag(f)) => {
-                return Some(
-                    "`-EncodedCommand` hides the command from the guard. Run the command in \
-                     plain text."
-                        .to_string(),
-                );
-            }
+            "powershell" | "pwsh" | "powershell_ise" => return Some(POWERSHELL.to_string()),
             name if DOCKER_TOOLS.contains(&name) => {
                 if let Some(sub) = rest.iter().find(|s| DOCKER_SUBS.contains(&s.as_str())) {
                     return Some(format!(
                         "`{name} {sub}` is blocked: it can read the server keys, the environment or \
                          the logs of the azure-safe-mcp container. Ask the user to run `safe-azure \
                          doctor` in their own terminal for container diagnostics. {USE_MCP}"
+                    ));
+                }
+                if reaches_other_container(rest) {
+                    return Some(format!(
+                        "`{name}` options that share another container's processes, memory, files \
+                         or network, or that mount the Docker socket or the host, are blocked: \
+                         they reach the server's keys and tokens. {USE_MCP}"
                     ));
                 }
                 let first = next_word(rest);
@@ -612,10 +978,21 @@ fn check_tokens(tokens: &[String]) -> Option<String> {
     None
 }
 
-/// `-e`, `-ec`, `-enc`, … `-EncodedCommand` (PowerShell accepts any unambiguous prefix).
-fn is_encoded_flag(flag: &str) -> bool {
-    let body = flag.strip_prefix('-').or_else(|| flag.strip_prefix('/'));
-    body.is_some_and(|b| !b.is_empty() && ("encodedcommand".starts_with(b) || b == "ec"))
+/// `cargo install --path …` / `--git …` / `safe-azure`, `cargo uninstall safe-azure`.
+fn cargo_replaces_guard(rest: &[String]) -> bool {
+    match next_word(rest) {
+        Some("install") => rest.iter().any(|t| {
+            t == "safe-azure"
+                || t == "--path"
+                || t.starts_with("--path=")
+                || t == "--git"
+                || t.starts_with("--git=")
+                || t == "--root"
+                || t.starts_with("--root=")
+        }),
+        Some("uninstall") => rest.iter().any(|t| t == "safe-azure"),
+        _ => false,
+    }
 }
 
 /// `Get-AzAccessToken`, `Connect-AzAccount`, `Get-AzContext`… (verb-noun with an `Az` noun).
@@ -658,6 +1035,7 @@ mod tests {
         Env {
             home: Some("c:/users/alice".into()),
             config_dir: Some("c:/users/alice/appdata/roaming/safe-azure".into()),
+            exe: Some("c:/users/alice/.cargo/bin/safe-azure.exe".into()),
         }
     }
 
@@ -720,7 +1098,7 @@ mod tests {
             ),
             (
                 "safe-azure doctor",
-                shell("PowerShell", "safe-azure.exe doctor"),
+                shell("Bash", "safe-azure.exe doctor"),
                 ALLOW,
             ),
             (
@@ -738,20 +1116,49 @@ mod tests {
                 shell("Bash", "docker build -t app ."),
                 ALLOW,
             ),
+            // --- PowerShell is refused as a whole
             (
-                "ps get-childitem",
+                "PowerShell tool",
                 shell("PowerShell", "Get-ChildItem -Recurse src"),
-                ALLOW,
+                DENY,
             ),
             (
-                "ps azure word",
+                "PowerShell tool, harmless text",
                 shell("PowerShell", "Get-Content docs/azure.md"),
-                ALLOW,
+                DENY,
             ),
             (
-                "pwsh file",
-                shell("PowerShell", "pwsh -File build.ps1 -ExecutionPolicy Bypass"),
-                ALLOW,
+                "PowerShell tool, malformed input",
+                event("PowerShell", &json!({})),
+                DENY,
+            ),
+            (
+                "pwsh from Bash",
+                shell("Bash", "pwsh -File build.ps1 -ExecutionPolicy Bypass"),
+                DENY,
+            ),
+            (
+                "powershell.exe from Bash",
+                shell("Bash", "powershell.exe -NoProfile -Command Get-Date"),
+                DENY,
+            ),
+            (
+                "powershell through cmd",
+                shell("Bash", "cmd /c \"powershell Get-Date\""),
+                DENY,
+            ),
+            (
+                "powershell full path",
+                shell(
+                    "Bash",
+                    "/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -c 1",
+                ),
+                DENY,
+            ),
+            (
+                "unknown tool running pwsh",
+                event("Monitor", &json!({"command": "pwsh -c Get-Date"})),
+                DENY,
             ),
             (
                 "read src",
@@ -1333,6 +1740,225 @@ mod tests {
             (
                 "unknown tool with command",
                 event("Monitor", &json!({"command": "az login"})),
+                DENY,
+            ),
+            // --- self-protection of the guard binary
+            (
+                "rm own binary",
+                shell("Bash", "rm ~/.cargo/bin/safe-azure"),
+                DENY,
+            ),
+            (
+                "Remove-Item own binary",
+                shell(
+                    "PowerShell",
+                    r"Remove-Item C:\Users\alice\.cargo\bin\safe-azure.exe -Force",
+                ),
+                DENY,
+            ),
+            (
+                "overwrite own binary",
+                shell("Bash", "echo x > ~/.cargo/bin/safe-azure.exe"),
+                DENY,
+            ),
+            (
+                "Write own binary",
+                event(
+                    "Write",
+                    &json!({"file_path": r"C:\Users\alice\.cargo\bin\safe-azure.exe", "content": "x"}),
+                ),
+                DENY,
+            ),
+            (
+                "cargo install path",
+                shell("Bash", "cd cli && cargo install --path ."),
+                DENY,
+            ),
+            (
+                "cargo uninstall",
+                shell("Bash", "cargo uninstall safe-azure"),
+                DENY,
+            ),
+            (
+                "cargo install other",
+                shell("Bash", "cargo install ripgrep"),
+                ALLOW,
+            ),
+            (
+                "safe-azure doctor redirect",
+                shell("Bash", "safe-azure doctor > out.txt"),
+                ALLOW,
+            ),
+            (
+                "cargo build",
+                shell(
+                    "Bash",
+                    "cargo build --release && ls target/release/safe-azure.exe",
+                ),
+                ALLOW,
+            ),
+            // --- wildcards and 8.3 short names
+            (
+                "glob azure cache",
+                shell("Bash", "cat ~/.az*/msal_t*"),
+                DENY,
+            ),
+            (
+                "glob config dir",
+                shell("Bash", "cat ~/.config/safe-a*/k*"),
+                DENY,
+            ),
+            (
+                "find name glob",
+                shell("Bash", "find ~ -name \"msal_t*\" -exec cat {} +"),
+                DENY,
+            ),
+            (
+                "PowerShell glob",
+                shell("PowerShell", r#"Get-Content "$env:APPDATA\safe-a*\*.yaml""#),
+                DENY,
+            ),
+            ("glob repo config", shell("Bash", "cat config/*.yaml"), DENY),
+            ("glob star in config", shell("Bash", "ls ~/.config/*"), DENY),
+            (
+                "glob unrelated",
+                shell("Bash", "ls src/*.ts && cat docs/*.md"),
+                ALLOW,
+            ),
+            (
+                "jq index",
+                shell("Bash", "jq '.[0].name' package.json"),
+                ALLOW,
+            ),
+            (
+                "Read short name",
+                event(
+                    "Read",
+                    &json!({"file_path": r"C:\Users\alice\AZURE~1\azureProfile.json"}),
+                ),
+                DENY,
+            ),
+            (
+                "Read short contexts",
+                event(
+                    "Read",
+                    &json!({"file_path": r"C:\Users\alice\AppData\Roaming\SAFE-A~1\CONTEX~1.YAM"}),
+                ),
+                DENY,
+            ),
+            (
+                "shell short name",
+                shell("Bash", "cat /c/Users/alice/AZURE~1/msal_t~1.jso"),
+                DENY,
+            ),
+            (
+                "git HEAD~1",
+                shell("Bash", "git diff HEAD~1 -- src/main.ts"),
+                ALLOW,
+            ),
+            (
+                "git origin main~2",
+                shell("Bash", "git log origin/main~2"),
+                ALLOW,
+            ),
+            (
+                "program files short",
+                event("Read", &json!({"file_path": r"C:\PROGRA~1\x\readme.txt"})),
+                ALLOW,
+            ),
+            // --- drive-relative paths
+            (
+                "Grep drive-relative home",
+                event("Grep", &json!({"pattern": "x", "path": r"\Users\alice"})),
+                DENY,
+            ),
+            (
+                "Grep drive-relative roaming",
+                event(
+                    "Grep",
+                    &json!({"pattern": "x", "path": r"\Users\alice\AppData\Roaming"}),
+                ),
+                DENY,
+            ),
+            // --- docker reaching into the server container
+            (
+                "docker run pid container",
+                shell(
+                    "Bash",
+                    "docker run --rm --pid=container:3f2a1b alpine cat /proc/1/root/run/x",
+                ),
+                DENY,
+            ),
+            (
+                "docker run pid host",
+                shell("Bash", "docker run --rm --pid host alpine ps"),
+                DENY,
+            ),
+            (
+                "docker run network container",
+                shell(
+                    "Bash",
+                    "docker run --network container:3f2a1b alpine wget -qO- x",
+                ),
+                DENY,
+            ),
+            (
+                "docker volumes-from",
+                shell("Bash", "docker run --volumes-from 3f2a1b alpine ls"),
+                DENY,
+            ),
+            (
+                "docker socket",
+                shell(
+                    "Bash",
+                    "docker run -v /var/run/docker.sock:/var/run/docker.sock docker:cli ps",
+                ),
+                DENY,
+            ),
+            (
+                "docker privileged",
+                shell("Bash", "docker run --privileged alpine sh"),
+                DENY,
+            ),
+            (
+                "docker host root",
+                shell("Bash", "docker run -v /:/host alpine ls /host"),
+                DENY,
+            ),
+            (
+                "docker kill usr1",
+                shell("Bash", "docker kill --signal=USR1 3f2a1b"),
+                DENY,
+            ),
+            (
+                "docker checkpoint",
+                shell("Bash", "docker checkpoint create 3f2a1b cp1"),
+                DENY,
+            ),
+            (
+                "docker compose exec",
+                shell("Bash", "docker compose exec azure-safe-mcp sh"),
+                DENY,
+            ),
+            (
+                "docker container exec",
+                shell("Bash", "docker container exec 3f2a1b sh"),
+                DENY,
+            ),
+            (
+                "docker run plain",
+                shell("Bash", "docker run --rm -p 127.0.0.1:5432:5432 postgres:16"),
+                ALLOW,
+            ),
+            // --- Unicode dashes
+            (
+                "pwsh en dash enc",
+                shell("PowerShell", "pwsh \u{2013}e SQBFAFgA"),
+                DENY,
+            ),
+            (
+                "powershell em dash enc",
+                shell("PowerShell", "powershell \u{2014}enc SQBFAFgA"),
                 DENY,
             ),
         ];

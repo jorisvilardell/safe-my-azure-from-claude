@@ -14,7 +14,8 @@ export interface AnonymizerConfig {
 export interface Anonymizer {
   readonly pseudonymizer: Pseudonymizer;
   readonly options: ScrubOptions;
-  scrub(value: unknown): unknown;
+  /** `strict` for data whose keys the AI controls (KQL results, see `ScrubOptions.strict`). */
+  scrub(value: unknown, overrides?: Pick<ScrubOptions, 'strict'>): unknown;
   scrubString(input: string): string;
 }
 
@@ -27,7 +28,8 @@ export function createAnonymizer(config: AnonymizerConfig = {}): Anonymizer {
   return {
     pseudonymizer,
     options,
-    scrub: (value) => scrub(value, pseudonymizer, options),
+    scrub: (value, overrides) =>
+      scrub(value, pseudonymizer, overrides === undefined ? options : { ...options, ...overrides }),
     scrubString: (input) => scrubString(input, pseudonymizer, options),
   };
 }

@@ -24,9 +24,14 @@ export class Pseudonymizer {
     const existing = this.#forward.get(key);
     if (existing !== undefined) return existing;
 
-    const next = (this.#counters.get(kind) ?? 0) + 1;
+    let next = this.#counters.get(kind) ?? 0;
+    let placeholder: string;
+    // Skip numbers already taken, e.g. by a contexts.yaml alias spelled `id-001`.
+    do {
+      next++;
+      placeholder = `${kind}-${String(next).padStart(3, '0')}`;
+    } while (this.#reverse.has(placeholder));
     this.#counters.set(kind, next);
-    const placeholder = `${kind}-${String(next).padStart(3, '0')}`;
     this.#set(key, placeholder);
     return placeholder;
   }

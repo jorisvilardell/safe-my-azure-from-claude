@@ -49,10 +49,21 @@ fn blocks_login_with_exit_2_and_a_reason() {
 }
 
 #[test]
-fn blocks_powershell_http_to_the_server() {
+fn blocks_the_powershell_tool_whatever_the_command() {
     hook(&event(
         "PowerShell",
-        &serde_json::json!({ "command": "Invoke-WebRequest http://127.0.0.1:8765/admin/contexts" }),
+        &serde_json::json!({ "command": "Get-Date" }),
+    ))
+    .code(2)
+    .stdout(predicate::str::is_empty())
+    .stderr(predicate::str::contains("PowerShell is blocked"));
+}
+
+#[test]
+fn blocks_http_to_the_server() {
+    hook(&event(
+        "Bash",
+        &serde_json::json!({ "command": "curl http://127.0.0.1:8765/admin/contexts" }),
     ))
     .code(2)
     .stdout(predicate::str::is_empty())

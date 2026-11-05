@@ -360,6 +360,22 @@ describe('logs feature', () => {
       expect(out.truncation?.join(' ')).toContain(`More than ${MAX_ROWS} rows`);
     });
 
+    it('masks a public IP under an AI-chosen *version key (bag_pack), and encoded IDs', async () => {
+      const ip = '203.0.113.77';
+      const sub = '00000000-0000-0000-0000-00000000c0de';
+      const rig = setup(() =>
+        success(
+          table(1, 2, (_r, c) =>
+            c === 0 ? { x_version: ip, agentVersion: ip } : `u=%2Fsubscriptions%2F${sub}%2Fx`,
+          ),
+        ),
+      );
+      const result = await rig.call('run_kql', { workspace: 'law-prod', query: 'T' });
+      const text = JSON.stringify(kql(result));
+      expect(text).not.toContain(ip);
+      expect(text).not.toContain(sub);
+    });
+
     it('is not truncated at exactly 500 rows', async () => {
       const rig = setup(() => success(table(MAX_ROWS)));
       const out = kql(await rig.call('run_kql', { workspace: 'law-prod', query: 'T' }));
