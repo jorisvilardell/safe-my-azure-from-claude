@@ -118,7 +118,7 @@ describe('inventory feature', () => {
           location: 'westeurope',
           subscriptionId: SUB_APP,
           provisioningState: 'Succeeded',
-          tags: { ...TAGS, env: 'x'.repeat(1000) },
+          tags: { ...TAGS, env: 'word '.repeat(200) },
         },
       ]);
       const result = await call('list_resource_groups');
@@ -137,9 +137,36 @@ describe('inventory feature', () => {
       expect(rg?.tags.owner).toBe('[masked]');
       expect(rg?.tags['created-by']).toBe('[masked]');
       expect(rg?.tags.costCenter).toBe('[masked]');
-      expect(rg?.tags.env).toHaveLength(MAX_TEXT_LENGTH + 1);
+      expect(rg?.tags.env?.length).toBeLessThanOrEqual(MAX_TEXT_LENGTH);
+      expect(rg?.tags.env).toMatch(/^word( word)+…$/);
       // Safe tag values are shown, but still scrubbed.
       expect(rg?.tags.app).toMatch(/^checkout from public-ip-/);
+    });
+
+    // #53 item 1: the mapper caps BEFORE executeTool scrubs; a cut must never leave a fragment.
+    it.each([
+      ['GUID', v.SUBSCRIPTION_ID],
+      ['email', v.OWNER_EMAIL],
+      ['JWT', v.FAKE_ID_TOKEN],
+    ])('never cuts a %s that straddles the tag value cap', async (_label, secret) => {
+      for (const shift of [-8, -1, 0, 1, 8]) {
+        const prefix = 'x'.repeat(MAX_TEXT_LENGTH - Math.floor(secret.length / 2) + shift);
+        const { call } = setup([
+          {
+            id: `/subscriptions/${SUB_APP}/resourceGroups/rg-app`,
+            name: 'rg-app',
+            location: 'westeurope',
+            subscriptionId: SUB_APP,
+            tags: { env: `${prefix.slice(0, 10)} ${prefix.slice(10)} ${secret} end` },
+          },
+        ]);
+        const body = parseToolText(await call('list_resource_groups')) as {
+          resourceGroups: { tags: Record<string, string> }[];
+        };
+        const env = body.resourceGroups[0]?.tags.env ?? '';
+        expect(env.length).toBeLessThanOrEqual(MAX_TEXT_LENGTH);
+        expect(env).not.toContain(secret.slice(0, 6));
+      }
     });
 
     it('scopes the query to the requested subscription alias', async () => {

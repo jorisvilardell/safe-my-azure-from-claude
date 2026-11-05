@@ -6,6 +6,7 @@ import { RESOURCE_GRAPH_RESPONSE } from './resource-graph.js';
 
 export { ACTIVITY_LOG_EVENT, FIRED_ALERT, LOG_ANALYTICS_TABLE, METRICS_RESPONSE, RESOURCE_GRAPH_RESPONSE };
 export { createRestError } from './rest-error.js';
+export * from './injection.js';
 export * from './values.js';
 
 /** Every raw-payload fixture, by name. Add new fixtures here to get them pipeline-tested. */

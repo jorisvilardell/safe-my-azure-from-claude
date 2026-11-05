@@ -8,14 +8,20 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildFeatures } from '../../src/app/features.js';
 import { startHttpServer } from '../../src/app/server.js';
 import { INVENTORY_QUERY } from '../../src/core/azure/index.js';
-import { createLogger } from '../../src/core/logging/index.js';
 import * as v from '../fixtures/azure/values.js';
+import { createAnonymizer } from '../../src/core/anonymizer/index.js';
+import { contextIdAliases } from '../../src/core/config/index.js';
+import { createAuditLog, createLogger } from '../../src/core/logging/index.js';
+import { UNTRUSTED_NOTICE } from '../../src/core/mcp/index.js';
+import { INVISIBLE_IN_OUTPUT } from '../fixtures/azure/index.js';
+import { INJECTED_RESOURCE, plantInjections, SAFE_TAG_KEY } from './injected-azure.js';
 import {
   createFakeAzureAccess,
   createLoginRig,
   createTestToolContext,
   expectNoLeak,
   FAKE_CONTEXTS,
+  FAKE_RESOURCES,
   toLeakText,
 } from '../helpers/index.js';
 
@@ -77,15 +83,31 @@ const features = buildFeatures({
 const TOOL_NAMES = features.flatMap((f) => f.tools.map((t) => t.name));
 
 // The inventory index is on, so the tools also run their "served from memory" path.
+// Schema-generated arguments use "vm-web-01" for every string, resource group included.
+const leakyRows = ({ query }: { query: string }): readonly unknown[] =>
+  query === INVENTORY_QUERY ? LEAKY_INVENTORY_ROWS : [];
 const azure = createFakeAzureAccess({
   inventory: {},
-  resourceGraphRows: ({ query }) => (query === INVENTORY_QUERY ? LEAKY_INVENTORY_ROWS : []),
+  resources: [...FAKE_RESOURCES, INJECTED_RESOURCE],
+  resourceGraphRows: leakyRows,
 });
 const logLines: string[] = [];
+const auditLines: string[] = [];
+const anonymizerConfig = { aliases: contextIdAliases(FAKE_CONTEXTS), safeTagKeys: [SAFE_TAG_KEY] };
 const ctx = createTestToolContext({
   azure,
+  anonymizer: createAnonymizer(anonymizerConfig),
   logger: createLogger('debug', { write: (line) => logLines.push(line) }),
+  audit: createAuditLog({
+    mode: 'stderr',
+    anonymizer: createAnonymizer(anonymizerConfig),
+    write: (line) => auditLines.push(line),
+  }),
 });
+
+/** Tool output in the "injected" state, by tool name (both argument variants). */
+const injectedOutputs = new Map<string, string[]>();
+let currentState = '';
 
 let server: Server;
 let baseUrl: URL;
@@ -124,6 +146,7 @@ afterAll(async () => {
   });
   // Server logs go to stderr in production, which an agent may read: they must be clean too.
   expectNoLeak(logLines);
+  expectNoLeak(auditLines);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -233,12 +256,18 @@ async function callAndCheck(tool: Tool, full: boolean): Promise<void> {
   const text = toLeakText(output);
   expect(text, `generated arguments for ${tool.name} were rejected`).not.toMatch(/Input validation error/);
   expectNoLeak(output);
+  if (currentState === 'injected') {
+    injectedOutputs.set(tool.name, [...(injectedOutputs.get(tool.name) ?? []), text]);
+  }
 }
 
 const STATES: readonly (readonly [string, () => void])[] = [
   [
     'logged in',
     () => {
+      // Undo a previous "injected" state: logout drops the cached inventory snapshot.
+      for (const alias of Object.keys(FAKE_CONTEXTS)) azure.logout(alias);
+      azure.setResourceGraphRows(leakyRows);
       for (const alias of Object.keys(FAKE_CONTEXTS)) azure.login(alias);
     },
   ],
@@ -246,6 +275,14 @@ const STATES: readonly (readonly [string, () => void])[] = [
     'logged out',
     () => {
       for (const alias of Object.keys(FAKE_CONTEXTS)) azure.logout(alias);
+    },
+  ],
+  [
+    // Every free-text field from Azure carries a prompt-injection payload (#39).
+    'injected',
+    () => {
+      for (const alias of Object.keys(FAKE_CONTEXTS)) azure.login(alias);
+      plantInjections(azure);
     },
   ],
 ];
@@ -256,9 +293,10 @@ describe('MCP over HTTP: every tool, every state, no leak', () => {
     expect(listedTools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
   });
 
-  describe.each(STATES)('%s', (_state, enter) => {
+  describe.each(STATES)('%s', (state, enter) => {
     it.each(TOOL_NAMES)('%s', async (name) => {
       enter();
+      currentState = state;
       const tool = listedTools.find((t) => t.name === name);
       expect(tool, `${name} missing from tools/list`).toBeDefined();
       if (tool === undefined) return;
@@ -341,11 +379,54 @@ describe('MCP inventory resource', () => {
           expect(prod).toContain('rg-app/microsoft.compute/virtualmachines/vm-web-01');
           expect(prod).toContain('nsg-allow-public-ip-');
           expect(prod).not.toContain('rg-app/microsoft.resources');
-        } else {
+        } else if (state === 'logged out') {
           expect(prod).toContain('NotLoggedIn');
+        } else {
+          expect(prod).not.toContain('NotLoggedIn');
         }
       });
     });
+  });
+});
+
+/** Tools that copy Azure free text: in the "injected" state, each must flag the payloads. */
+const FLAGGING_TOOLS = [
+  'search_resources',
+  'get_resource',
+  'list_fired_alerts',
+  'get_activity_log',
+  'run_kql',
+  'list_metric_definitions',
+  'get_metrics',
+  'get_resource_health',
+  'list_service_health_events',
+  'list_advisor_recommendations',
+];
+
+describe('prompt injection in tool results (#39)', () => {
+  it('every advertised tool description starts with the untrusted-data notice', () => {
+    for (const tool of listedTools) expect(tool.description?.startsWith(UNTRUSTED_NOTICE)).toBe(true);
+  });
+
+  it('no output of any tool contains an invisible or control character', () => {
+    expect(injectedOutputs.size).toBe(TOOL_NAMES.length);
+    for (const [name, outputs] of injectedOutputs) {
+      for (const text of outputs) expect(text, name).not.toMatch(INVISIBLE_IN_OUTPUT);
+    }
+  });
+
+  it.each(FLAGGING_TOOLS)('%s flags the planted payloads in a top-level warnings field', (name) => {
+    const outputs = injectedOutputs.get(name) ?? [];
+    expect(
+      outputs.some((t) => t.includes('Possible prompt injection in ')),
+      `${name}: ${outputs.join('\n').slice(0, 600)}`,
+    ).toBe(true);
+  });
+
+  it('audits every call, with the injection-warning count', () => {
+    const lines = auditLines.map((l) => JSON.parse(l) as { tool: string; injectionWarnings: number });
+    expect(new Set(lines.map((l) => l.tool))).toEqual(new Set(TOOL_NAMES));
+    expect(lines.some((l) => l.injectionWarnings > 0)).toBe(true);
   });
 });
 

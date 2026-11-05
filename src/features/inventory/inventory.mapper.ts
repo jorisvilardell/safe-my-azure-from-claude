@@ -1,8 +1,9 @@
 import { maskTags } from '../../core/anonymizer/index.js';
+import { untrustedText } from '../../core/safety/index.js';
 
 /**
- * Free text copied from Azure (names, tag values, host names) is capped so one field cannot flood
- * the AI's context or carry a long injected prompt (#39 will wrap these fields further).
+ * Free text copied from Azure (names, tag values, host names) goes through `untrustedText()`:
+ * invisible characters removed, capped so one field cannot flood the AI's context (#39).
  */
 export const MAX_TEXT_LENGTH = 256;
 export const MAX_TAGS = 50;
@@ -65,8 +66,7 @@ function isRecord(v: unknown): v is Json {
 }
 
 export function text(v: unknown): string | undefined {
-  if (typeof v !== 'string' || v === '') return undefined;
-  return v.length > MAX_TEXT_LENGTH ? `${v.slice(0, MAX_TEXT_LENGTH)}…` : v;
+  return untrustedText(v, { max: MAX_TEXT_LENGTH });
 }
 
 function at(obj: unknown, path: readonly string[]): unknown {

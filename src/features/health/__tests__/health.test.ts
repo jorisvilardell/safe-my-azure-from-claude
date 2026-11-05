@@ -405,7 +405,7 @@ function advisorRow(overrides: Record<string, unknown> = {}): Record<string, unk
     category: 'HighAvailability',
     impact: 'High',
     problem: `Enable backups for ${VM_ARM_ID} (owner ${OWNER_EMAIL}, ip ${PUBLIC_IP_CLIENT})`,
-    solution: `${HIDDEN} ${LONG}`,
+    solution: `${HIDDEN} ${'word '.repeat(600)}`,
     resourceId: VM_ARM_ID,
     impactedField: 'Microsoft.Compute/virtualMachines',
     impactedValue: 'vm-web-01',
@@ -464,8 +464,9 @@ describe('list_advisor_recommendations', () => {
       lastUpdated: '2026-11-02T06:00:00.000Z',
     });
     expect(vm?.problem).toMatch(/^Enable backups for rg-app\/virtualMachines\/vm-web-01 \(owner user-\d{3}/);
-    expect(vm?.solution.startsWith('hiddentext xxx')).toBe(true);
-    expect(Array.from(vm?.solution ?? '').length).toBe(512);
+    expect(vm?.solution.startsWith('hiddentext word')).toBe(true);
+    expect(vm?.solution.endsWith('word…')).toBe(true);
+    expect(Array.from(vm?.solution ?? '').length).toBeLessThanOrEqual(512);
     expect(sub).toMatchObject({ subscription: 'prod-network', target: '(subscription)', lastUpdated: null });
     expect(rg?.target).toBe('rg-app');
   });

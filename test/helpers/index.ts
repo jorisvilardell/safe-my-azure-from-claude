@@ -1,7 +1,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createAnonymizer } from '../../src/core/anonymizer/index.js';
 import { contextIdAliases } from '../../src/core/config/index.js';
-import { createLogger } from '../../src/core/logging/index.js';
+import { createLogger, NO_AUDIT } from '../../src/core/logging/index.js';
 import { createFakeAzureAccess, FAKE_CONTEXTS } from './azure.js';
 import { assertNoLeakWith } from './leak.js';
 import type { ToolContext } from '../../src/core/mcp/index.js';
@@ -15,6 +15,7 @@ export function createTestToolContext(overrides: Partial<ToolContext> = {}): Too
     anonymizer: createAnonymizer({ aliases: contextIdAliases(FAKE_CONTEXTS) }),
     logger: createLogger('error', { write: () => undefined }),
     azure: createFakeAzureAccess(),
+    audit: NO_AUDIT,
     ...overrides,
   };
 }

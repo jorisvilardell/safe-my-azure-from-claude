@@ -51,3 +51,30 @@ describe('inventory settings', () => {
     expect(() => loadEnv({ INVENTORY_MAX_RESOURCES: '-1' })).toThrow();
   });
 });
+
+describe('AUDIT_LOG', () => {
+  it('defaults to stderr, with no file', () => {
+    const env = loadEnv({});
+    expect(env.AUDIT_LOG).toBe('stderr');
+    expect(env.AUDIT_LOG_FILE).toBeUndefined();
+  });
+
+  it('accepts off, and file with an explicit path', () => {
+    expect(loadEnv({ AUDIT_LOG: 'off' }).AUDIT_LOG).toBe('off');
+    expect(loadEnv({ AUDIT_LOG: 'file', AUDIT_LOG_FILE: '/app/audit/audit.jsonl' })).toMatchObject({
+      AUDIT_LOG: 'file',
+      AUDIT_LOG_FILE: '/app/audit/audit.jsonl',
+    });
+  });
+
+  it('rejects file without a path, a path without file mode, and unknown modes', () => {
+    expect(() => loadEnv({ AUDIT_LOG: 'file' })).toThrow(/AUDIT_LOG_FILE/);
+    expect(() => loadEnv({ AUDIT_LOG: 'file', AUDIT_LOG_FILE: '' })).toThrow(/AUDIT_LOG_FILE/);
+    expect(() => loadEnv({ AUDIT_LOG_FILE: '/tmp/a.jsonl' })).toThrow(/AUDIT_LOG_FILE/);
+    expect(() => loadEnv({ AUDIT_LOG: 'syslog' })).toThrow();
+  });
+
+  it('treats an empty AUDIT_LOG_FILE (docker-compose default) as unset', () => {
+    expect(loadEnv({ AUDIT_LOG: 'stderr', AUDIT_LOG_FILE: '' }).AUDIT_LOG_FILE).toBeUndefined();
+  });
+});

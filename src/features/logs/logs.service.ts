@@ -8,7 +8,7 @@ import {
 import type { Anonymizer } from '../../core/anonymizer/index.js';
 import { kqlString, type AzureAccess, type AzureSession } from '../../core/azure/index.js';
 import { AppError, sanitizeError, type SafeError } from '../../core/errors/index.js';
-import { guardKql, type KqlTimespan } from '../../core/safety/index.js';
+import { guardKql, untrustedText, type KqlTimespan } from '../../core/safety/index.js';
 import {
   kindOf,
   MAX_ROWS,
@@ -295,7 +295,10 @@ export async function listTables(azure: AzureAccess, input: WorkspaceRef): Promi
     const [name, count] = row;
     if (typeof name !== 'string') return [];
     return [
-      { name: name.slice(0, 256), rowCount24h: typeof count === 'number' ? count : Number(count) || 0 },
+      {
+        name: untrustedText(name, { max: 256 }) ?? '',
+        rowCount24h: typeof count === 'number' ? count : Number(count) || 0,
+      },
     ];
   });
   return {

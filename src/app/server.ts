@@ -5,7 +5,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { Express } from 'express';
 import type { LoginPageState } from '../core/azure/index.js';
 import type { Logger } from '../core/logging/index.js';
-import { registerFeatures, type Feature, type ToolContext } from '../core/mcp/index.js';
+import { registerFeatures, UNTRUSTED_NOTICE, type Feature, type ToolContext } from '../core/mcp/index.js';
 import { registerInventoryResource } from './inventory-resource.js';
 import { LOGIN_PAGE_HEADERS, renderLoginPage } from './login-page.js';
 
@@ -25,7 +25,10 @@ export interface HttpServerOptions {
 export function createMcpServer(
   opts: Pick<HttpServerOptions, 'version' | 'features' | 'ctx' | 'inventoryResource'>,
 ): McpServer {
-  const server = new McpServer({ name: 'safe-my-azure-from-claude', version: opts.version });
+  const server = new McpServer(
+    { name: 'safe-my-azure-from-claude', version: opts.version },
+    { instructions: UNTRUSTED_NOTICE },
+  );
   registerFeatures(server, opts.features, opts.ctx);
   if (opts.inventoryResource === true) registerInventoryResource(server, opts.ctx);
   return server;

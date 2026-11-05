@@ -10,7 +10,7 @@ import {
   type LoginCredential,
 } from '../../src/core/azure/index.js';
 import { contextIdAliases } from '../../src/core/config/index.js';
-import { createLogger } from '../../src/core/logging/index.js';
+import { createAuditLog, createLogger } from '../../src/core/logging/index.js';
 import type { ToolContext } from '../../src/core/mcp/index.js';
 import { createFakeClientFactory, FAKE_ACCESS_TOKEN, FAKE_CONTEXTS } from './azure.js';
 
@@ -134,7 +134,13 @@ export function createLoginRig(opts: StubLoginOptions & { readonly initialActive
     credentials: manager,
     clients: createFakeClientFactory(),
   });
-  const ctx: ToolContext = { anonymizer: createAnonymizer({ aliases }), logger, azure };
+  // Audit lines land in `logs` too, so every leak check on them covers the audit trail.
+  const audit = createAuditLog({
+    mode: 'stderr',
+    anonymizer: createAnonymizer({ aliases }),
+    write: (line) => logs.push(line),
+  });
+  const ctx: ToolContext = { anonymizer: createAnonymizer({ aliases }), logger, azure, audit };
   return { stub, manager, azure, ctx, logs };
 }
 

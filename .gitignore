@@ -9,6 +9,9 @@ coverage/
 # Real tenant/subscription mapping — NEVER commit (see AGENTS.md R7)
 config/contexts.yaml
 
+# Optional audit trail volume (AUDIT_LOG=file)
+audit/
+
 # Claude Code local overrides
 .claude/settings.local.json
 

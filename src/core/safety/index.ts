@@ -7,3 +7,15 @@ export {
   type KqlGuardOptions,
 } from './kql-guard.js';
 export { DEFAULT_TIMESPAN, type KqlTimespan, type KqlTimespanInput } from './kql-timespan.js';
+export { detectInjection, findInjections, injectionWarnings, MAX_INJECTION_WARNINGS } from './injection.js';
+export {
+  neutralizeText,
+  stripInvisible,
+  stripInvisibleDeep,
+  truncateText,
+  untrustedText,
+  type NeutralizeOptions,
+  type Truncated,
+  type TruncateOptions,
+  type UntrustedTextOptions,
+} from './untrusted-text.js';
