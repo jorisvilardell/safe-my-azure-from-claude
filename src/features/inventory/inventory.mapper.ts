@@ -1,4 +1,4 @@
-import { maskTags } from '../../core/anonymizer/index.js';
+import { armRef, maskTags } from '../../core/anonymizer/index.js';
 import { untrustedText } from '../../core/safety/index.js';
 
 /**
@@ -110,19 +110,12 @@ function mapSku(raw: unknown): SkuDto | undefined {
 }
 
 /**
- * Builds `<rg>/<type>/<name>[/<childType>/<child>]` from the ARM ID's names, like the scrubber's
- * `shortenArmId`, but without any pseudonym: the ID itself never leaves this function.
+ * Builds the shared ref `<rg>/<type>/<name>[/<childType>/<child>]` (`armRef`, the same format as
+ * alerts and advisor) from the ARM ID's names: the ID itself never leaves this function.
  */
 export function resourceRef(id: unknown, resourceGroup: string, type: string, name: string): string {
-  if (typeof id === 'string') {
-    const segments = id.split('/').filter(Boolean);
-    const lower = segments.map((s) => s.toLowerCase());
-    const rgIdx = lower.indexOf('resourcegroups');
-    const provIdx = lower.lastIndexOf('providers');
-    if (rgIdx !== -1 && provIdx > rgIdx) {
-      return [segments[rgIdx + 1] ?? resourceGroup, ...segments.slice(provIdx + 2)].join('/');
-    }
-  }
+  const ref = typeof id === 'string' ? armRef(id) : undefined;
+  if (ref?.includes('/') === true) return ref;
   const shortType = type.split('/').slice(1).join('/') || type;
   return `${resourceGroup}/${shortType}/${name}`;
 }

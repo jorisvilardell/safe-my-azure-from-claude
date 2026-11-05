@@ -90,6 +90,8 @@ mocks ([#37](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/
    descriptions, messages). Never `.slice()` free text yourself: a cut through a GUID, email or token
    leaves a fragment the scrubber no longer recognises (R10).
 4. Inputs take **names or aliases** (`resourceGroup`, `name`, `subscription` alias), never raw IDs. Resolve them to IDs inside the service.
+   Validate them with the shared zod schemas from `core/mcp` (`SubscriptionAlias`, `ResourceGroupName`, `ResourceName`, `ResourceType`), never a feature-local regex.
+   A resource reference returned to the AI is `armRef()` from `core/anonymizer` (`rg/type/name`, no namespace), the same in every feature.
 5. Get Azure access **only** through the handler's `ctx` (`ToolContext`). Never build a credential, and never `new` an SDK client outside `ctx.azure.clients`:
    - `ctx.azure.session()`: the active context's `credential` and real subscription IDs (`subscriptionId(alias)`, `subscriptionIds()`). Throws `NoActiveContext` / `NotLoggedIn` (already AI-friendly `AppError`s).
    - `ctx.azure.resourceGraph.query(kql, { subscriptions?, maxRows? })` → rows; `.queryResult(...)` → `{ rows, truncated }`. Pass `truncated` on to the AI. Put AI input into KQL with `kqlString()` only.

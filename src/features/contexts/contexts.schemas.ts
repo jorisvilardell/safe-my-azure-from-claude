@@ -1,8 +1,9 @@
 import { z } from 'zod';
+import { ALIAS_PATTERN } from '../../core/config/index.js';
 
 const ALIAS = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'alias must be lowercase kebab-case (max 40 chars)')
+  .regex(ALIAS_PATTERN, 'alias must be lowercase kebab-case (max 40 chars)')
   .describe('Context alias, as listed by list_contexts.');
 
 export const ListContextsInput = {};

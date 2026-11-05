@@ -1,15 +1,5 @@
 import { z } from 'zod';
-
-/** Azure resource group names: letters, digits, `_`, `-`, `.`, `(`, `)`, at most 90 characters. */
-const RESOURCE_GROUP = z
-  .string()
-  .regex(/^[\w.()-]{1,90}$/u, 'resourceGroup must be a resource group NAME')
-  .describe('Resource group name (not an ID).');
-
-const RESOURCE_NAME = z
-  .string()
-  .regex(/^[\w.()-]{1,260}$/u, 'resource must be a resource NAME')
-  .describe('Resource name (not an ID), e.g. vm-web-01.');
+import { ResourceGroupName as RESOURCE_GROUP, ResourceName as RESOURCE_NAME } from '../../core/mcp/index.js';
 
 export const TIME_RANGES = ['1h', '1d', '7d', '30d'] as const;
 export const SEVERITIES = ['Sev0', 'Sev1', 'Sev2', 'Sev3', 'Sev4'] as const;

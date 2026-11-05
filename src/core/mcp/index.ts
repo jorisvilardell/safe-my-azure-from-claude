@@ -9,3 +9,4 @@ export {
   type ToolDefinition,
 } from './define-tool.js';
 export { defineFeature, registerFeatures, type Feature } from './feature.js';
+export { ResourceGroupName, ResourceName, ResourceType, SubscriptionAlias } from './input-schemas.js';

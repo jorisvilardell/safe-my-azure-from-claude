@@ -95,10 +95,8 @@ describe('createResourceResolver', () => {
     const err: unknown = await s.resolve({ name: 'vm-web-01' }).catch((e: unknown) => e);
     expect(err).toMatchObject({ code: 'AmbiguousResource' });
     const message = (err as Error).message;
-    expect(message).toContain('rg-app/Microsoft.Compute/virtualMachines/vm-web-01 (subscription prod-app)');
-    expect(message).toContain(
-      'rg-net/Microsoft.Compute/virtualMachines/vm-web-01 (subscription prod-network)',
-    );
+    expect(message).toContain('rg-app/virtualMachines/vm-web-01 (subscription prod-app)');
+    expect(message).toContain('rg-net/virtualMachines/vm-web-01 (subscription prod-network)');
     expectNoLeak(message);
 
     const text = await viaTool(s, { name: 'vm-web-01' });

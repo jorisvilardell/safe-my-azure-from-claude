@@ -1,5 +1,6 @@
 import type { AvailabilityStatus, Event } from '@azure/arm-resourcehealth';
 import { z } from 'zod';
+import { armRef } from '../../core/anonymizer/index.js';
 import { untrustedText } from '../../core/safety/index.js';
 
 /** Cap for every free-text field copied from Azure (titles, summaries, Advisor text). */
@@ -50,22 +51,18 @@ function isoTime(value: unknown): string | null {
 
 export interface ArmTarget {
   readonly subscriptionId: string;
-  /** `rg/Namespace/type/name` (names only), `rg` for a resource group, `null` for a subscription. */
+  /**
+   * The shared ref `rg/type/name` (`armRef`: names only, like alerts and inventory), `rg` for a
+   * resource group, `null` for a subscription.
+   */
   readonly target: string | null;
 }
 
 /** Splits an ARM ID into its subscription GUID (server-side only) and a names-only target. */
 export function parseArmId(id: string): ArmTarget | undefined {
   const segments = id.split('/').filter(Boolean);
-  const lower = segments.map((s) => s.toLowerCase());
-  if (lower[0] !== 'subscriptions' || segments[1] === undefined) return undefined;
-  const subscriptionId = segments[1];
-  const rgIdx = lower.indexOf('resourcegroups');
-  const rg = rgIdx === -1 ? undefined : segments[rgIdx + 1];
-  if (rg === undefined) return { subscriptionId, target: null };
-  const provIdx = lower.indexOf('providers');
-  const tail = provIdx === -1 ? [] : segments.slice(provIdx + 1);
-  return { subscriptionId, target: [rg, ...tail].join('/') };
+  if (segments[0]?.toLowerCase() !== 'subscriptions' || segments[1] === undefined) return undefined;
+  return { subscriptionId: segments[1], target: armRef(id) ?? null };
 }
 
 // ---------------------------------------------------------------------------------------------

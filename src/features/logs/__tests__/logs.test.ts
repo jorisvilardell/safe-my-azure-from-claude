@@ -1,5 +1,6 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import {
   CALLER_EMAIL,
   CLIENT_SECRET,
@@ -24,6 +25,7 @@ import {
 import { executeTool, type ToolDefinition } from '../../../core/mcp/index.js';
 import { createLogsFeature } from '../index.js';
 import { MAX_CELL_CHARS, MAX_COLUMNS, MAX_RESULT_CHARS, MAX_ROWS } from '../logs.mapper.js';
+import { RunKqlInput } from '../logs.schemas.js';
 import { LOGS_CLIENT_KEY, SERVER_TIMEOUT_SECONDS } from '../logs.service.js';
 
 const SUB_NETWORK = '00000000-0000-0000-0000-000000000002';
@@ -163,6 +165,20 @@ describe('logs feature', () => {
       'list_tables',
       'run_kql',
     ]);
+  });
+
+  // #53 item 5: the shared core schemas, like every other feature.
+  it.each([
+    ['subscription', `/subscriptions/${SUBSCRIPTION_ID}`],
+    ['resourceGroup', 'rg app'],
+    ['workspace', `/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/rg/providers/x/y/law-prod`],
+    ['workspace', "law' or 1==1"],
+  ])('rejects unsafe %s', (key, value) => {
+    const schema = z.object(RunKqlInput);
+    expect(schema.safeParse({ workspace: 'law-prod', query: 'T | take 1' }).success).toBe(true);
+    expect(schema.safeParse({ workspace: 'law-prod', query: 'T | take 1', [key]: value }).success).toBe(
+      false,
+    );
   });
 
   describe('list_workspaces', () => {

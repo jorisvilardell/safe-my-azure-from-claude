@@ -1,3 +1,4 @@
+import { PUBLIC_IP_NAME_PLACEHOLDER } from '../../core/anonymizer/index.js';
 import { azureClients, type AzureAccess, type ResourceRef } from '../../core/azure/index.js';
 import { AppError } from '../../core/errors/index.js';
 import { parseFilter, renderFilter } from './metrics.filter.js';
@@ -91,13 +92,34 @@ export interface MetricsResult {
   readonly seriesTruncated: boolean;
 }
 
-/** Placeholders the anonymiser hands the AI. Only these are mapped back to real filter values. */
+/** Counter placeholders the anonymiser hands the AI (`id-001`, `public-ip-external-002`, …). */
 const PSEUDONYM = /^(?:id|user|app|ip|public-ip-external)-\d{3,}$/;
 
 export interface MetricsDeps {
   /** `ctx.anonymizer.pseudonymizer.resolve`: a masked dimension value the AI sends back → real value. */
   readonly resolvePseudonym: (placeholder: string) => string | undefined;
+  /**
+   * Addresses of the active context's public IP resources with this name, from the inventory
+   * snapshot (`ctx.azure.inventory.current()?.publicIpAddresses`). `undefined` when it is not fresh.
+   */
+  readonly publicIpAddresses?: (name: string) => readonly string[] | undefined;
   readonly now?: () => number;
+}
+
+/**
+ * Maps a placeholder the AI copied from an earlier result back to the real dimension value, so
+ * the description's promise ("a masked value can be used as-is") holds. Only placeholders are
+ * mapped: any other value is sent as typed. `public-ip-<name>` (#53) resolves through the inventory
+ * snapshot when exactly one public IP has that name, else through the pseudonymizer, which knows
+ * every `public-ip-<name>` the scrubber has shown.
+ */
+export function filterValue(value: string, deps: MetricsDeps): string {
+  if (PSEUDONYM.test(value)) return deps.resolvePseudonym(value) ?? value;
+  const name = PUBLIC_IP_NAME_PLACEHOLDER.exec(value)?.[1];
+  if (name === undefined) return value;
+  const [address, ...others] = deps.publicIpAddresses?.(name) ?? [];
+  if (address !== undefined && others.length === 0) return address;
+  return deps.resolvePseudonym(value) ?? value;
 }
 
 function toRef(input: ResourceInput): ResourceRef {
@@ -223,7 +245,7 @@ export async function getMetrics(
       ...(filter === undefined
         ? {}
         : {
-            filter: renderFilter(filter, (v) => (PSEUDONYM.test(v) ? (deps.resolvePseudonym(v) ?? v) : v)),
+            filter: renderFilter(filter, (v) => filterValue(v, deps)),
             top,
           }),
     }),

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { armRef } from '../anonymizer/index.js';
 import { AppError } from '../errors/index.js';
 import type { AzureSession, ContextStore, ResourceRef, ResourceResolver } from './contracts.js';
 import type { InventoryIndex, InventorySnapshot } from './inventory-index.js';
@@ -112,7 +113,8 @@ export function createResourceResolver(deps: ResolverDeps): ResourceResolver {
     const aliases = multiSub ? subscriptionAliases(session) : new Map<string, string>();
     // Names only: the ARM ID and the subscription ID never go into the message (G2).
     const candidates = shown.map((r) => {
-      const label = `${r.resourceGroup}/${r.type}/${r.name}`;
+      // The shared ref format (`rg/type/name`, #53); the last type segment is a valid `type` input.
+      const label = armRef(r.id) ?? `${r.resourceGroup}/${r.type.split('/').pop() ?? r.type}/${r.name}`;
       if (!multiSub) return label;
       return `${label} (subscription ${aliases.get(r.subscriptionId.toLowerCase()) ?? 'unknown'})`;
     });

@@ -160,7 +160,7 @@ describe('get_resource_health', () => {
       .strict()
       .parse(json);
 
-    expect(dto.resource).toBe('rg-app/Microsoft.Compute/virtualMachines/vm-web-01');
+    expect(dto.resource).toBe('rg-app/virtualMachines/vm-web-01');
     expect(dto.availabilityState).toBe('Unavailable');
     expect(dto.reasonType).toBe('Unplanned');
     expect(dto.reasonChronicity).toBe('Persistent');
@@ -460,7 +460,7 @@ describe('list_advisor_recommendations', () => {
       category: 'HighAvailability',
       impact: 'High',
       subscription: 'prod-app',
-      target: 'rg-app/Microsoft.Compute/virtualMachines/vm-web-01',
+      target: 'rg-app/virtualMachines/vm-web-01',
       lastUpdated: '2026-11-02T06:00:00.000Z',
     });
     expect(vm?.problem).toMatch(/^Enable backups for rg-app\/virtualMachines\/vm-web-01 \(owner user-\d{3}/);

@@ -1,14 +1,10 @@
 import { z } from 'zod';
-
-const SUBSCRIPTION = z
-  .string()
-  .regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'subscription must be an alias (lowercase kebab-case, max 40 chars)')
-  .describe('Subscription alias, as listed by list_contexts. Omit to search every subscription.');
-
-const RESOURCE_GROUP = z
-  .string()
-  .regex(/^[\w\-.()]{1,90}$/, 'resourceGroup must be a resource group name (max 90 chars)')
-  .describe('Resource group name.');
+import {
+  ResourceGroupName as RESOURCE_GROUP,
+  ResourceName,
+  ResourceType,
+  SubscriptionAlias as SUBSCRIPTION,
+} from '../../core/mcp/index.js';
 
 export const TIME_RANGES = ['1d', '7d', '30d'] as const;
 export const EVENT_TYPES = [
@@ -32,15 +28,8 @@ export const DEFAULT_ADVISOR_LIMIT = 50;
 
 export const GetResourceHealthInput = {
   resourceGroup: RESOURCE_GROUP,
-  name: z
-    .string()
-    .regex(/^[^\p{Cc}/]{1,260}$/u, 'name must be a resource name (max 260 chars, no "/")')
-    .describe('Resource name.'),
-  type: z
-    .string()
-    .regex(/^[A-Za-z0-9.]{1,100}(\/[A-Za-z0-9.]{1,100}){0,4}$/, 'type must be an ARM type')
-    .optional()
-    .describe('ARM type, e.g. Microsoft.Compute/virtualMachines, or its last segment (virtualMachines).'),
+  name: ResourceName,
+  type: ResourceType.optional(),
   subscription: SUBSCRIPTION.optional(),
 };
 
