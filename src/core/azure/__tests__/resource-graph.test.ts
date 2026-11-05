@@ -1,17 +1,31 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createFakeAzureAccess, createFakeTokenCredential } from '../../../../test/helpers/index.js';
+import {
+  createFakeAzureAccess,
+  createFakeClientFactory,
+  createFakeTokenCredential,
+} from '../../../../test/helpers/index.js';
 import { AppError } from '../../errors/index.js';
 import {
   HARD_MAX_ROWS,
+  RESOURCE_GRAPH_CLIENT_KEY,
+  azureClients,
   createClientFactory,
   createResourceGraph,
   kqlString,
   type AzureSession,
+  type ClientFactory,
   type ResourceGraphQueryClient,
 } from '../index.js';
 
 type Request = Parameters<ResourceGraphQueryClient['resources']>[0];
 type Page = Awaited<ReturnType<ResourceGraphQueryClient['resources']>>;
+
+/** A client factory serving `client` as the Resource Graph client (the real factory only builds SDK clients). */
+function stubFactory(client: ResourceGraphQueryClient): ClientFactory {
+  const clients = createFakeClientFactory();
+  clients.stub(RESOURCE_GRAPH_CLIENT_KEY, client);
+  return clients;
+}
 
 function stubClient(pages: readonly Page[]): {
   client: ResourceGraphQueryClient;
@@ -56,7 +70,7 @@ describe('createResourceGraph', () => {
 
   it('scopes queries to the active context subscriptions by default', async () => {
     const { client, requests } = stubClient([{ data: [{ a: 1 }] }]);
-    const rg = createResourceGraph({ session, clients: createClientFactory(), createClient: () => client });
+    const rg = createResourceGraph({ session, clients: stubFactory(client) });
 
     await expect(rg.query('resources')).resolves.toEqual([{ a: 1 }]);
     expect(requests[0]?.subscriptions).toEqual([
@@ -68,7 +82,7 @@ describe('createResourceGraph', () => {
 
   it('refuses subscriptions outside the active context', async () => {
     const { client, requests } = stubClient([{ data: [] }]);
-    const rg = createResourceGraph({ session, clients: createClientFactory(), createClient: () => client });
+    const rg = createResourceGraph({ session, clients: stubFactory(client) });
 
     await expect(
       rg.query('resources', { subscriptions: ['00000000-0000-0000-0000-000000000003'] }),
@@ -82,7 +96,7 @@ describe('createResourceGraph', () => {
       { data: rows(2, 2), skipToken: 't2' },
       { data: rows(4, 1) },
     ]);
-    const rg = createResourceGraph({ session, clients: createClientFactory(), createClient: () => client });
+    const rg = createResourceGraph({ session, clients: stubFactory(client) });
 
     const result = await rg.query<{ n: number }>('resources');
     expect(result.map((r) => r.n)).toEqual([0, 1, 2, 3, 4]);
@@ -92,7 +106,7 @@ describe('createResourceGraph', () => {
 
   it('stops at the row cap even when more pages exist', async () => {
     const { client, requests } = stubClient([{ data: rows(0, 3), skipToken: 'more' }]);
-    const rg = createResourceGraph({ session, clients: createClientFactory(), createClient: () => client });
+    const rg = createResourceGraph({ session, clients: stubFactory(client) });
 
     const result = await rg.query('resources', { maxRows: 7 });
     expect(result).toHaveLength(7);
@@ -101,7 +115,7 @@ describe('createResourceGraph', () => {
 
   it('clamps maxRows to the hard cap', async () => {
     const { client, requests } = stubClient([{ data: rows(0, 1000), skipToken: 'more' }]);
-    const rg = createResourceGraph({ session, clients: createClientFactory(), createClient: () => client });
+    const rg = createResourceGraph({ session, clients: stubFactory(client) });
 
     const result = await rg.query('resources', { maxRows: 1_000_000 });
     expect(result).toHaveLength(HARD_MAX_ROWS);
@@ -110,31 +124,24 @@ describe('createResourceGraph', () => {
 
   it('rejects non-array data', async () => {
     const { client } = stubClient([{ data: { columns: [], rows: [] } }]);
-    const rg = createResourceGraph({ session, clients: createClientFactory(), createClient: () => client });
+    const rg = createResourceGraph({ session, clients: stubFactory(client) });
     await expect(rg.query('resources')).rejects.toMatchObject({ code: 'UnexpectedResponse' });
   });
 
   it('fails with NotLoggedIn before building a client', async () => {
     const loggedOut = createFakeAzureAccess({ loggedIn: [] });
-    const createClient = vi.fn();
-    const rg = createResourceGraph({
-      session: () => loggedOut.session(),
-      clients: createClientFactory(),
-      createClient,
-    });
+    const clients = createFakeClientFactory();
+    const getClient = vi.spyOn(clients, 'getClient');
+    const rg = createResourceGraph({ session: () => loggedOut.session(), clients });
     await expect(rg.query('resources')).rejects.toMatchObject({ code: 'NotLoggedIn' });
-    expect(createClient).not.toHaveBeenCalled();
+    expect(getClient).not.toHaveBeenCalled();
   });
 });
 
 describe('resourceGraph.queryResult', () => {
   const azure = createFakeAzureAccess();
   const build = (pages: readonly Page[]): ReturnType<typeof createResourceGraph> =>
-    createResourceGraph({
-      session: () => azure.session(),
-      clients: createClientFactory(),
-      createClient: () => stubClient(pages).client,
-    });
+    createResourceGraph({ session: () => azure.session(), clients: stubFactory(stubClient(pages).client) });
 
   it('is not truncated when every row fits', async () => {
     const rg = build([{ data: rows(0, 2), skipToken: 't1' }, { data: rows(2, 1) }]);
@@ -189,7 +196,7 @@ describe('createClientFactory', () => {
     const clients = createClientFactory();
     const credA = createFakeTokenCredential();
     const credB = createFakeTokenCredential();
-    const create = vi.fn(() => ({}));
+    const create = azureClients.resourceGraph();
 
     const a1 = clients.getClient({ contextAlias: 'prod', credential: credA }, 'rg', create);
     const a2 = clients.getClient({ contextAlias: 'prod', credential: credA }, 'rg', create);
@@ -201,13 +208,12 @@ describe('createClientFactory', () => {
 
     const relogin = clients.getClient({ contextAlias: 'prod', credential: credB }, 'rg', create);
     expect(relogin).not.toBe(a1);
-    expect(create).toHaveBeenLastCalledWith(credB);
   });
 
   it('invalidates one context or all of them', () => {
     const clients = createClientFactory();
     const credential = createFakeTokenCredential();
-    const create = (): object => ({});
+    const create = azureClients.resourceGraph();
     const prod = clients.getClient({ contextAlias: 'prod', credential }, 'rg', create);
     const lab = clients.getClient({ contextAlias: 'lab', credential }, 'rg', create);
 

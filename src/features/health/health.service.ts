@@ -1,6 +1,6 @@
-import { MicrosoftResourceHealth, type AvailabilityStatus, type Event } from '@azure/arm-resourcehealth';
+import type { AvailabilityStatus, Event } from '@azure/arm-resourcehealth';
 import type { Pseudonymizer } from '../../core/anonymizer/index.js';
-import { kqlString, type AzureAccess, type AzureSession } from '../../core/azure/index.js';
+import { azureClients, kqlString, type AzureAccess, type AzureSession } from '../../core/azure/index.js';
 import { AppError } from '../../core/errors/index.js';
 import {
   AdvisorRow,
@@ -58,7 +58,7 @@ function resourceHealthClient(
   return azure.clients.getClient(
     session,
     resourceHealthClientKey(subscriptionId),
-    (credential) => new MicrosoftResourceHealth(credential, subscriptionId),
+    azureClients.resourceHealth(subscriptionId),
   );
 }
 

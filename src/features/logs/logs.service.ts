@@ -1,12 +1,12 @@
 import {
-  LogsQueryClient,
   LogsQueryResultStatus,
+  type LogsQueryClient,
   type LogsQueryOptions,
   type LogsQueryResult,
   type QueryTimeInterval,
 } from '@azure/monitor-query-logs';
 import type { Anonymizer } from '../../core/anonymizer/index.js';
-import { kqlString, type AzureAccess, type AzureSession } from '../../core/azure/index.js';
+import { azureClients, kqlString, type AzureAccess, type AzureSession } from '../../core/azure/index.js';
 import { AppError, sanitizeError, type SafeError } from '../../core/errors/index.js';
 import { guardKql, untrustedText, type KqlTimespan } from '../../core/safety/index.js';
 import {
@@ -209,11 +209,7 @@ async function execute(
   timespan: KqlTimespan,
 ): Promise<LogsQueryResult> {
   const session = azure.session();
-  const client = azure.clients.getClient<LogsClient>(
-    session,
-    LOGS_CLIENT_KEY,
-    (credential) => new LogsQueryClient(credential),
-  );
+  const client = azure.clients.getClient<LogsClient>(session, LOGS_CLIENT_KEY, azureClients.logsQuery());
   const options: LogsQueryOptions = {
     serverTimeoutInSeconds: SERVER_TIMEOUT_SECONDS,
     abortSignal: AbortSignal.timeout(CLIENT_TIMEOUT_MS),

@@ -14,7 +14,17 @@ const noAppImport = {
 };
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'node_modules/**', '.claude/worktrees/**', 'target/**'] },
+  {
+    // test/read-only/fixtures: deliberately bad snippets for the read-only analyzer's self-test.
+    ignores: [
+      'dist/**',
+      'coverage/**',
+      'node_modules/**',
+      '.claude/worktrees/**',
+      'target/**',
+      'test/read-only/fixtures/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,

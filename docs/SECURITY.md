@@ -252,6 +252,20 @@ Why this design:
   Resource Graph, the Log Analytics and App Insights query APIs, the metrics API, Resource Health,
   Service Health and Advisor reads. There is no generic "run any ARM call" tool.
 - Every tool is announced with `readOnlyHint: true` and `destructiveHint: false`.
+- **Read-only is enforced, not only intended** (AGENTS.md R2):
+  - _At runtime._ Azure SDK clients are only built by the client factory (`core/azure/client-factory.ts`),
+    which adds a read-only pipeline policy (`core/azure/read-only-policy.ts`) at both ends of each
+    client's pipeline and refuses to hand out a client where it is missing. It lets through `GET` and
+    `HEAD` to `management.azure.com` and `api.loganalytics.io`, plus three read-only POSTs: the Resource
+    Graph query, the Log Analytics workspace query and the App Insights resource-centric query. Any
+    other method, path, host, userinfo or traversal (`..`, `%2e`, `%2f`) fails with `WriteBlocked`
+    before the request leaves the container. The second instance, after the signing phase, also sees
+    retries and redirect hops. Token requests go through MSAL's own HTTP client and are not affected.
+  - _In CI, statically._ `test/read-only/` walks `src/` with the TypeScript compiler and fails on a
+    write-like or unknown method called on an Azure SDK object, on an SDK client constructed outside
+    the factory, and on raw `fetch` / `http(s).request` / `undici`. It has a self-test on bad fixtures.
+  - _In CI, end to end._ The e2e-mock job checks that every request Dev Proxy intercepted for
+    `management.azure.com` or `api.loganalytics.io` is a `GET` or an allowlisted POST.
 - KQL is checked before it is sent (`core/safety/kql-guard.ts`): management commands (`.show`,
   `.set`, …), `set` and other non-query statements, cross-scope and external functions
   (`cluster()`, `database()`, `workspace()`, `app()`, `resource()`, `adx()`, `arg()`,

@@ -1,5 +1,4 @@
-import { MonitorClient } from '@azure/arm-monitor';
-import type { AzureAccess, ResourceRef } from '../../core/azure/index.js';
+import { azureClients, type AzureAccess, type ResourceRef } from '../../core/azure/index.js';
 import { AppError } from '../../core/errors/index.js';
 import { parseFilter, renderFilter } from './metrics.filter.js';
 import {
@@ -48,9 +47,6 @@ export interface MonitorMetricsClient {
     list(resourceUri: string): AsyncIterable<RawMetricDefinition>;
   };
 }
-
-const createClient = (credential: ConstructorParameters<typeof MonitorClient>[0]): MonitorMetricsClient =>
-  new MonitorClient(credential);
 
 const INTERVAL_MS: Readonly<Record<Interval, number>> = {
   PT1M: 60_000,
@@ -119,7 +115,14 @@ async function target(
 ): Promise<{ uri: string; client: MonitorMetricsClient }> {
   const session = azure.session();
   const uri = await azure.resolver.resolve(toRef(input));
-  return { uri, client: azure.clients.getClient(session, METRICS_CLIENT_KEY, createClient) };
+  return {
+    uri,
+    client: azure.clients.getClient<MonitorMetricsClient>(
+      session,
+      METRICS_CLIENT_KEY,
+      azureClients.monitor(),
+    ),
+  };
 }
 
 /** An HTTP 400 from Azure Monitor is almost always the AI's query: say so, without Azure's message (R4). */
