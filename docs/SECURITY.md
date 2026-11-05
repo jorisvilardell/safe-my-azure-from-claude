@@ -247,7 +247,8 @@ Why this design:
 - **In-memory token cache** (R8): there is no `tokenCachePersistenceOptions`, no volume and no
   file. A container restart means signing in again. That is the price of having nothing on disk to
   steal (a persisted, encrypted cache is discussed in
-  [#14](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/14)).
+  [#14](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/14) and proposed
+  [ADR 0002](./adr/0002-persisted-token-cache.md)).
 - `logout` drops the credential object of a context.
 
 ### Server keys

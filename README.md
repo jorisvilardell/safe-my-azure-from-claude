@@ -82,6 +82,7 @@ ask Claude: _"what fired in the last hour?"_ The `safe-azure` CLI is tracked in
 - **[docs/SECURITY.md](./docs/SECURITY.md)**: threat model, what the AI can and cannot see, RBAC, deny rules, residual risks.
 - **[docs/CLIENTS.md](./docs/CLIENTS.md)**: Claude Desktop, VS Code, Cursor and other MCP clients.
 - **[docs/RELEASING.md](./docs/RELEASING.md)**: version bump, tag, and what the release workflows publish.
+- **[docs/adr/](./docs/adr/)**: architecture decisions ([0001](./docs/adr/0001-cli-auth-install.md) CLI, keys and install; [0002](./docs/adr/0002-persisted-token-cache.md) persisted token cache, proposed).
 - **[AGENTS.md](./AGENTS.md)**: architecture, security rules and conventions for contributors, human or AI.
 
 ## Try it without an Azure tenant
