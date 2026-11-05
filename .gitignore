@@ -17,3 +17,6 @@ audit/
 
 # Agent worktrees (Claude Code isolation)
 .claude/worktrees/
+
+# Rust CLI build output
+cli/target/

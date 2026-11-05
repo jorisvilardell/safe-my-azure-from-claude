@@ -1,0 +1,50 @@
+[package]
+name = "safe-azure"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Installer, login helper, MCP bridge and Claude Code guard for safe-my-azure-from-claude"
+license = "MIT"
+repository = "https://github.com/jorisvilardell/safe-my-azure-from-claude"
+readme = "README.md"
+
+[[bin]]
+name = "safe-azure"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+dirs = "7.0.0"
+open = "5.4.5"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+ureq = { version = "3.5.1", features = ["json"] }
+which = "8.0.6"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Security_Cryptography",
+  "Win32_System_Memory",
+] }
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+predicates = "3.1.4"
+tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "warn"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1
