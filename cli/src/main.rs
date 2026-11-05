@@ -11,6 +11,7 @@ mod commands;
 mod keys;
 mod paths;
 mod server;
+mod skill;
 
 use clap::{Parser, Subcommand};
 
