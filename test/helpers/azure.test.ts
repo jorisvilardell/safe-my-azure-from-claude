@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { azureClients } from '../../src/core/azure/index.js';
 import { AppError } from '../../src/core/errors/index.js';
 import { FAKE_ACCESS_TOKEN, createFakeAzureAccess, createTestToolContext } from './index.js';
 
@@ -88,9 +89,8 @@ describe('createFakeAzureAccess', () => {
     const fake = { list: () => [] };
     azure.stubClient(/^alerts:/, fake);
 
-    const create = (): never => {
-      throw new Error('a real client must never be built');
-    };
+    // The fake never runs the spec: no real SDK client is built in tests.
+    const create = azureClients.monitor();
     expect(azure.clients.getClient(session, 'alerts:00000000-0000-0000-0000-000000000001', create)).toBe(
       fake,
     );

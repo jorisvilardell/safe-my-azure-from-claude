@@ -9,7 +9,22 @@ export type {
 } from './contracts.js';
 export { createContextStore, type ContextStoreDeps } from './context-store.js';
 export { createAzureAccess, type AzureAccessDeps } from './azure-access.js';
-export { createClientFactory, type ClientFactory } from './client-factory.js';
+export {
+  azureClients,
+  createClientFactory,
+  type ClientFactory,
+  type ClientFactoryDeps,
+  type ClientSpec,
+} from './client-factory.js';
+export {
+  assertReadOnlyAzureRequest,
+  classifyAzureRequest,
+  READ_ONLY_POLICY_NAME,
+  READ_ONLY_POSTS,
+  READ_ONLY_WIRE_POLICY_NAME,
+  type ReadOnlyPost,
+  type ReadOnlyVerdict,
+} from './read-only-policy.js';
 export {
   createResourceGraph,
   createResourceGraphScan,

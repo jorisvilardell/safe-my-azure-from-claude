@@ -24,5 +24,6 @@
     "outDir": "dist",
     "rootDir": "."
   },
-  "include": ["src", "test", "*.config.ts"]
+  "include": ["src", "test", "*.config.ts"],
+  "exclude": ["test/read-only/fixtures"]
 }

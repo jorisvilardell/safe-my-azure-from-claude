@@ -93,7 +93,7 @@ mocks ([#37](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/
 5. Get Azure access **only** through the handler's `ctx` (`ToolContext`). Never build a credential, and never `new` an SDK client outside `ctx.azure.clients`:
    - `ctx.azure.session()`: the active context's `credential` and real subscription IDs (`subscriptionId(alias)`, `subscriptionIds()`). Throws `NoActiveContext` / `NotLoggedIn` (already AI-friendly `AppError`s).
    - `ctx.azure.resourceGraph.query(kql, { subscriptions?, maxRows? })` → rows; `.queryResult(...)` → `{ rows, truncated }`. Pass `truncated` on to the AI. Put AI input into KQL with `kqlString()` only.
-   - `ctx.azure.clients.getClient(session, key, (credential) => new SomeClient(credential, …))`: the shared per-context client cache. The key must identify everything the client is bound to (e.g. `alerts:<subscriptionId>`).
+   - `ctx.azure.clients.getClient(session, key, azureClients.monitor(subscriptionId))`: the shared per-context client cache. The third argument is an opaque spec from `azureClients` (`core/azure/client-factory.ts`), never a callback: `getClient` builds the client and installs the read-only guard (R2). A new SDK client is added to `azureClients`, the only place allowed to `new` one. The key must identify everything the client is bound to (e.g. `alerts:<subscriptionId>`).
    - `ctx.azure.resolver.resolve({ name, resourceGroup?, subscription?, type? })` → ARM ID, for name-based inputs.
    - `ctx.azure.inventory.current()` → the active context's in-memory inventory snapshot (resources and
      resource groups: name, type, resourceGroup, location, subscriptionId, ARM ID, sku, kind, tags, public
@@ -143,7 +143,11 @@ expectNoLeak(toolText(result));
 ## 3. Security rules (non-negotiable)
 
 - **R1.** Never add a tool that returns a token, credential, device code, server key, or raw HTTP request/response. No tool may start a device-code flow: only `POST /admin/login` does, and the `login` tool only tells the user to run `safe-azure login <alias>`.
-- **R2.** Never add a write/action API call. Allowed: ARM `GET`, Resource Graph query, Log Analytics / App Insights query, metrics query.
+- **R2.** Never add a write/action API call. Allowed: ARM `GET`, Resource Graph query, Log Analytics / App Insights query, metrics query. Enforced three ways:
+  - **Runtime** (`core/azure/read-only-policy.ts`): every SDK client is built by `getClient` from an `azureClients` spec, which puts the `safeAzureReadOnly` pipeline policy first in its pipeline and `safeAzureReadOnlyWire` last (retries and redirects included), then checks both are there or throws. Only `GET`/`HEAD` to `management.azure.com` / `api.loganalytics.io` and the POSTs in `READ_ONLY_POSTS` pass (Resource Graph `resources`, Log Analytics `/v1/workspaces/{id}/query`, App Insights `/v1/{componentId}/query`). Anything else throws `AppError('WriteBlocked')` before it is sent. MSAL token traffic does not use these pipelines.
+  - **Static** (`test/read-only/`, part of `npm test`): a TypeScript-compiler scan of `src/` fails on a write-like method (`begin*`, `create*`, `delete*`, `start`, `purge`, …) or any non-`list*`/`get*`/`query*`/`resources` call on an Azure SDK object or a client from `getClient`, on `new` of an `@azure/*` client outside `client-factory.ts`, and on raw `fetch` / `http(s).request` / `undici`. Fixtures in `test/read-only/fixtures/` prove it catches each case.
+  - **e2e-mock** (CI): every request Dev Proxy saw for `management.azure.com` / `api.loganalytics.io` must pass the same check.
+  - A new read-only POST means: extend `READ_ONLY_POSTS` with a comment (which feature calls it, why it cannot change anything) and add a test in `core/azure/__tests__/read-only-policy.test.ts`. Never loosen the check to "any POST".
 - **R3.** All tool output goes through `scrub()`. Do not bypass `defineTool`.
 - **R4.** All errors go through `sanitizeError()`. Never return `err.message` from the Azure SDK as-is (it contains URLs, subscription IDs, correlation IDs).
 - **R5.** Logs go to **stderr**, through the scrubbing logger. Never log headers, credentials, the server keys, the user code, or full SDK responses. `/admin/*` is not AI-facing (no anonymizer), but the same rule applies.

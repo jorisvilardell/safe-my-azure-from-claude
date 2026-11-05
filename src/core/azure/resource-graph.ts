@@ -1,7 +1,5 @@
-import type { TokenCredential } from '@azure/core-auth';
-import { ResourceGraphClient } from '@azure/arm-resourcegraph';
 import { AppError } from '../errors/index.js';
-import type { ClientFactory } from './client-factory.js';
+import { azureClients, type ClientFactory } from './client-factory.js';
 import type { AzureSession } from './contracts.js';
 
 /** Default and absolute row caps for one `query()` call. */
@@ -43,7 +41,6 @@ export interface ResourceGraphDeps {
   /** Usually `() => azure.session()`. Throws `NoActiveContext` / `NotLoggedIn`. */
   readonly session: () => AzureSession;
   readonly clients: ClientFactory;
-  readonly createClient?: (credential: TokenCredential) => ResourceGraphQueryClient;
 }
 
 /** `ClientFactory` key of the Resource Graph client. Fakes register their stub under it. */
@@ -81,12 +78,7 @@ export type ResourceGraphScan = <T>(
   opts: ResourceScanOptions,
 ) => Promise<ResourceQueryResult<T>>;
 
-export function createResourceGraphScan(
-  deps: Pick<ResourceGraphDeps, 'clients' | 'createClient'>,
-): ResourceGraphScan {
-  const createClient =
-    deps.createClient ?? ((credential: TokenCredential) => new ResourceGraphClient(credential));
-
+export function createResourceGraphScan(deps: Pick<ResourceGraphDeps, 'clients'>): ResourceGraphScan {
   return async <T>(
     session: AzureSession,
     kql: string,
@@ -104,7 +96,11 @@ export function createResourceGraphScan(
     if (subscriptions.length === 0) return { rows: [], truncated: false };
 
     const maxRows = Math.max(1, Math.floor(opts.maxRows));
-    const client = deps.clients.getClient(session, RESOURCE_GRAPH_CLIENT_KEY, createClient);
+    const client = deps.clients.getClient<ResourceGraphQueryClient>(
+      session,
+      RESOURCE_GRAPH_CLIENT_KEY,
+      azureClients.resourceGraph(),
+    );
     const rows: T[] = [];
     let skipToken: string | undefined;
     let truncated = false;

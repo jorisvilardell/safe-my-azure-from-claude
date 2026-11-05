@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { classifyAzureRequest } from '../../src/core/azure/index.js';
 import * as v from '../fixtures/azure/values.js';
 import { assertNoLeakWith, CANARIES, LEAK_PATTERNS, toLeakText, type Canary } from '../helpers/index.js';
 import { sampleArgs } from '../helpers/schema-sample.js';
@@ -280,5 +281,33 @@ describe(`mocked Azure over MCP (${CHAOS ? 'chaos' : 'mocks'})`, () => {
       // Parallel requests can trip it without a client bug, so report rather than fail.
       process.stdout.write(`RetryAfterPlugin: ${early} request(s) sent before Retry-After elapsed.\n`);
     }
+  });
+
+  it.runIf(READ_DOCKER_LOGS)('only sent read-only requests to Azure (AGENTS.md R2)', () => {
+    const proxyLog = dockerLogs(PROXY_CONTAINER);
+    // Dev Proxy logs each intercepted request as `<METHOD> <url>`. login.microsoftonline.com is
+    // MSAL's token traffic (device code, token): not an Azure resource API, and not checked here.
+    const requests = [
+      ...proxyLog.matchAll(
+        /\b(GET|HEAD|POST|PUT|PATCH|DELETE|MERGE|OPTIONS|TRACE)\s+(https:\/\/(?:management\.azure\.com|api\.loganalytics\.io)[^\s"'<>]*)/gi,
+      ),
+    ].map(([, method = '', url = '']) => ({ method: method.toUpperCase(), url }));
+    const kinds = new Set(requests.map((r) => `${r.method} ${classifyAzureRequest(r.method, r.url).kind}`));
+    // The parse must have seen the traffic of the run, or the assertion below would be vacuous.
+    // In chaos a failed lookup can skip a later call, so only the first two are certain there.
+    expect(kinds, 'Dev Proxy log: no ARM GET seen').toContain('GET read');
+    expect(kinds, 'Dev Proxy log: no Resource Graph query seen').toContain('POST resource-graph-query');
+    if (!CHAOS) {
+      expect(kinds, 'Dev Proxy log: no Log Analytics query seen').toContain('POST log-analytics-query');
+      expect(kinds, 'Dev Proxy log: no App Insights query seen').toContain('POST app-insights-query');
+    }
+    const refused = requests
+      .filter((r) => !classifyAzureRequest(r.method, r.url).allowed)
+      .map((r) => `${r.method} ${new URL(r.url).pathname}`);
+    expect(refused, 'non read-only requests reached Azure').toEqual([]);
+    // Belt and braces: no write method next to an Azure host anywhere in the log, whatever the format.
+    expect(proxyLog).not.toMatch(
+      /\b(?:PUT|PATCH|DELETE|MERGE)\b[^\n]*(?:management\.azure\.com|api\.loganalytics\.io)/,
+    );
   });
 });

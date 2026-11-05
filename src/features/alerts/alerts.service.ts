@@ -1,7 +1,5 @@
-import type { TokenCredential } from '@azure/core-auth';
-import { MonitorClient } from '@azure/arm-monitor';
 import type { Pseudonymizer } from '../../core/anonymizer/index.js';
-import { kqlString, type AzureAccess } from '../../core/azure/index.js';
+import { azureClients, kqlString, type AzureAccess } from '../../core/azure/index.js';
 import { AppError } from '../../core/errors/index.js';
 import {
   eventStatus,
@@ -248,7 +246,7 @@ export async function getActivityLog(
     const client = azure.clients.getClient<ActivityLogClient>(
       session,
       monitorClientKey(subscriptionId),
-      (credential: TokenCredential) => new MonitorClient(credential, subscriptionId),
+      azureClients.monitor(subscriptionId),
     );
     let scanned = 0;
     let kept = 0;

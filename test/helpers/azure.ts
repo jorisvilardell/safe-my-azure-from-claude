@@ -114,7 +114,7 @@ export interface FakeAzureAccess extends AzureAccess {
 /** `ClientFactory` that hands out stubs and never builds a real SDK client (no network in tests). */
 export interface FakeClientFactory extends ClientFactory {
   /**
-   * `getClient(session, key, create)` returns `client` for a matching key instead of calling `create`.
+   * `getClient(session, key, spec)` returns `client` for a matching key and never builds a real client.
    * Use a RegExp for per-subscription keys (`/^alerts:/`). Later stubs win. An unstubbed key throws.
    */
   stub(key: string | RegExp, client: unknown): void;
@@ -173,7 +173,7 @@ export function createFakeTokenCredential(token = FAKE_ACCESS_TOKEN): TokenCrede
  * - Resource Graph: `createFakeAzureAccess({ resourceGraphRows })` or `azure.setResourceGraphRows(...)`,
  *   then assert on `azure.resourceGraphQueries`.
  * - Other SDK clients: `azure.stubClient(key, fakeClient)` with the key the service passes to
- *   `ctx.azure.clients.getClient(session, key, create)`. An unstubbed key throws.
+ *   `ctx.azure.clients.getClient(session, key, azureClients.x())`. An unstubbed key throws.
  * - Names → IDs: `resolver` is in-memory, over `resources` (default `FAKE_RESOURCES`); `armId(r)`
  *   gives the ID it returns.
  * - Inventory index: off (`current()` is always `undefined`) unless `inventory: { now, ttlMs, … }`
