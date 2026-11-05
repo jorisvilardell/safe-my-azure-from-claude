@@ -14,7 +14,7 @@ const noAppImport = {
 };
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'node_modules/**', '.claude/worktrees/**'] },
+  { ignores: ['dist/**', 'coverage/**', 'node_modules/**', '.claude/worktrees/**', 'target/**'] },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
@@ -80,7 +80,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.js'],
+    files: ['**/*.js', '**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
   },
   prettier,

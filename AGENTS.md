@@ -205,4 +205,5 @@ When in doubt, choose the option that reveals **less** to the AI.
   this repo forbids.
 - **Squash merge only:** each PR lands on `main` as one commit, titled with the PR title.
 - CI (`.github/workflows/ci.yml`) runs `npm run check` on Node 24 and 26, and builds the Docker image. A PR must be green before merge.
+- **Versions are locked:** `package.json` and `cli/Cargo.toml` always match (the CLI version is the image tag). Change them only with `node scripts/bump-version.mjs X.Y.Z`. Releases: [docs/RELEASING.md](./docs/RELEASING.md).
 - Don't commit `config/contexts.yaml`, `.env`, or anything containing a real tenant or subscription ID. They're gitignored.

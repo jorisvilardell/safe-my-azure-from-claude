@@ -1,0 +1,58 @@
+# Rehearses a release on pull requests that can break it. Builds and packages, publishes nothing.
+# Other PRs skip it, so they stay fast.
+name: Release dry run
+
+on:
+  pull_request:
+    paths:
+      - 'cli/**'
+      - 'Dockerfile'
+      - 'dist-workspace.toml'
+      - 'scripts/bump-version.mjs'
+      - '.github/workflows/release*.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-dry-run-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DIST_VERSION: 0.34.0
+
+jobs:
+  release-dry-run:
+    name: dist plan and build (x86_64-unknown-linux-musl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: node scripts/bump-version.mjs --check
+      - name: Install dist
+        shell: bash
+        run: curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/axodotdev/cargo-dist/releases/download/v${DIST_VERSION}/cargo-dist-installer.sh" | sh
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+      # Also fails if release.yml is not what `dist generate` would write.
+      - run: dist plan
+      - name: Build binary, updater and installers
+        run: dist build --artifacts=all --target=x86_64-unknown-linux-musl
+      - name: Smoke test the binary
+        run: |
+          tar -xJf target/distrib/safe-azure-x86_64-unknown-linux-musl.tar.xz -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/safe-azure-x86_64-unknown-linux-musl/safe-azure" --version
+          ls -l target/distrib
+
+  release-dry-run-image:
+    name: Release image (build only)
+    uses: ./.github/workflows/release-image.yml
+    with:
+      push: false
+    permissions:
+      contents: read
+      packages: write
