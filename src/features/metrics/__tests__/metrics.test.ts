@@ -19,12 +19,19 @@ import {
   toolText,
   type FakeAzureAccess,
 } from '../../../../test/helpers/index.js';
+import { createAnonymizer } from '../../../core/anonymizer/index.js';
+import { createPublicIpIndex, INVENTORY_QUERY, INVENTORY_TTL_MS } from '../../../core/azure/index.js';
 import { executeTool, type ToolContext, type ToolDefinition } from '../../../core/mcp/index.js';
 import { createMetricsFeature } from '../index.js';
 import { MAX_FILTER_CLAUSES, parseFilter, renderFilter } from '../metrics.filter.js';
 import { FREE_TEXT_MAX, type RawMetricDefinition, type RawMetricsResponse } from '../metrics.mapper.js';
 import { GetMetricsInput, MAX_POINTS } from '../metrics.schemas.js';
-import { MAX_DEFINITIONS, METRICS_CLIENT_KEY, type MonitorMetricsClient } from '../metrics.service.js';
+import {
+  filterValue,
+  MAX_DEFINITIONS,
+  METRICS_CLIENT_KEY,
+  type MonitorMetricsClient,
+} from '../metrics.service.js';
 
 const VM = { resourceGroup: 'rg-app', name: 'vm-web-01', subscription: 'prod-app' } as const;
 const [VM_RESOURCE] = FAKE_RESOURCES;
@@ -78,10 +85,25 @@ function setup(
     response?: unknown;
     definitions?: readonly unknown[];
     fail?: () => Error;
+    /** Turns the inventory index on over these Resource Graph rows, and wires the public IP index. */
+    inventoryRows?: readonly unknown[];
+    clock?: { now: number };
   } = {},
 ): Rig {
-  const azure = createFakeAzureAccess();
-  const ctx = createTestToolContext({ azure });
+  const { inventoryRows, clock } = opts;
+  const azure =
+    inventoryRows === undefined
+      ? createFakeAzureAccess()
+      : createFakeAzureAccess({
+          inventory: { now: () => clock?.now ?? 1_000_000 },
+          resourceGraphRows: ({ query }) => (query === INVENTORY_QUERY ? inventoryRows : []),
+        });
+  const ctx = createTestToolContext({
+    azure,
+    ...(inventoryRows === undefined
+      ? {}
+      : { anonymizer: createAnonymizer({ publicIpIndex: createPublicIpIndex(azure.inventory) }) }),
+  });
   const calls: MetricsCall[] = [];
   const definitionCalls: string[] = [];
   const client: MonitorMetricsClient = {
@@ -303,6 +325,70 @@ describe('metrics feature', () => {
       expect(rig.calls[1]?.options?.filter).toBe(`RemoteIP eq '${PUBLIC_IP_CLIENT}'`);
     });
 
+    // #53 item 2: `public-ip-<name>` is a masked value too, and must work as-is in the filter.
+    describe('public-ip-<name> in the filter', () => {
+      const pipRow = (name: string, ipAddress: string, rg = 'rg-net'): Record<string, unknown> => ({
+        id: `/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/${rg}/providers/Microsoft.Network/publicIPAddresses/${name}`,
+        name,
+        type: 'microsoft.network/publicipaddresses',
+        resourceGroup: rg,
+        subscriptionId: '00000000-0000-0000-0000-000000000001',
+        location: 'westeurope',
+        ipAddress,
+      });
+      const split = { ...VM, metrics: ['Inbound Flows'], filter: "RemoteIP eq '*'" };
+
+      it('maps a public-ip-<name> the AI was shown back to the address', async () => {
+        const rig = setup({ inventoryRows: [pipRow('pip-web', PUBLIC_IP_CLIENT)] });
+        await rig.azure.inventory.refresh();
+        const first = parseToolText(await rig.call('get_metrics', split)) as MetricsOut;
+        const values = first.metrics[0]?.series.map((s) => s.dimensions.RemoteIP);
+        expect(values?.[0]).toBe('public-ip-pip-web');
+        expect(values?.[1]).toMatch(/^public-ip-external-\d+$/);
+
+        await rig.call('get_metrics', { ...split, filter: "RemoteIP eq 'public-ip-pip-web'" });
+        expect(rig.calls[1]?.options?.filter).toBe(`RemoteIP eq '${PUBLIC_IP_CLIENT}'`);
+      });
+
+      it('resolves a name through the inventory snapshot even if the AI never saw it masked', async () => {
+        const rig = setup({ inventoryRows: [pipRow('pip-api', PUBLIC_IP_PEER)] });
+        await rig.azure.inventory.refresh();
+        await rig.call('get_metrics', { ...split, filter: "RemoteIP eq 'public-ip-PIP-API'" });
+        expect(rig.calls[0]?.options?.filter).toBe(`RemoteIP eq '${PUBLIC_IP_PEER}'`);
+      });
+
+      it('still resolves once the snapshot is stale, through the pseudonymizer', async () => {
+        const clock = { now: 1_000_000 };
+        const rig = setup({ inventoryRows: [pipRow('pip-web', PUBLIC_IP_CLIENT)], clock });
+        await rig.azure.inventory.refresh();
+        await rig.call('get_metrics', split);
+        clock.now += INVENTORY_TTL_MS * 2;
+        rig.azure.setResourceGraphRows(() => []);
+        expect(rig.azure.inventory.current()).toBeUndefined();
+
+        const out = parseToolText(await rig.call('get_metrics', split)) as MetricsOut;
+        // #53 item 3: with no fresh snapshot the IP shows as public-ip-external-NNN; both work.
+        const external = out.metrics[0]?.series[0]?.dimensions.RemoteIP ?? '';
+        expect(external).toMatch(/^public-ip-external-\d+$/);
+        await rig.call('get_metrics', { ...split, filter: "RemoteIP eq 'public-ip-pip-web'" });
+        await rig.call('get_metrics', { ...split, filter: `RemoteIP eq '${external}'` });
+        expect(rig.calls[2]?.options?.filter).toBe(`RemoteIP eq '${PUBLIC_IP_CLIENT}'`);
+        expect(rig.calls[3]?.options?.filter).toBe(`RemoteIP eq '${PUBLIC_IP_CLIENT}'`);
+      });
+
+      it('falls back to what the AI was shown when the name is ambiguous, and leaves unknown names', () => {
+        const deps = {
+          resolvePseudonym: (p: string) => (p === 'public-ip-pip-web' ? PUBLIC_IP_CLIENT : undefined),
+          publicIpAddresses: () => [PUBLIC_IP_CLIENT, PUBLIC_IP_PEER],
+        };
+        expect(filterValue('public-ip-pip-web', deps)).toBe(PUBLIC_IP_CLIENT);
+        expect(filterValue('public-ip-nope', { ...deps, publicIpAddresses: () => [] })).toBe(
+          'public-ip-nope',
+        );
+        expect(filterValue('vm-web-01', deps)).toBe('vm-web-01');
+      });
+    });
+
     describe('points cap', () => {
       it(`refuses a result over ${MAX_POINTS} points and suggests a larger interval`, async () => {
         const data = Array.from({ length: MAX_POINTS + 1 }, (_, i) => ({
@@ -409,6 +495,16 @@ describe('metrics feature', () => {
           expect(parse({ timespan })).toBe(false);
         },
       );
+      // #53 item 5: the shared core schemas, like every other feature.
+      it.each([
+        ['subscription', 'Prod-App'],
+        ['resourceGroup', 'rg app'],
+        ['name', VM_ARM_ID],
+        ['name', "vm' or 1==1"],
+        ['type', 'Microsoft.Compute/virtualMachines | take 1'],
+      ])('rejects unsafe %s', (key, value) => {
+        expect(parse({ [key]: value })).toBe(false);
+      });
       it('defaults the timespan to PT1H', () => {
         expect(z.object(GetMetricsInput).parse({ ...VM, metrics: ['x'] }).timespan).toBe('PT1H');
       });

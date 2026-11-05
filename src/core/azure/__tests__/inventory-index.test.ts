@@ -129,6 +129,8 @@ describe('inventory index: build', () => {
     expect(snap?.resourceGroups.map((r) => r.name)).toEqual(['rg-app']);
     expect(snap?.resourceGroups[0]?.provisioningState).toBe('Succeeded');
     expect(snap?.publicIpName(v.PUBLIC_IP_CLIENT)).toBe('pip-web');
+    expect(snap?.publicIpAddresses('PIP-WEB')).toEqual([v.PUBLIC_IP_CLIENT]);
+    expect(snap?.publicIpAddresses('vm-web-01')).toEqual([]);
     // Allowlisted copy: unknown fields (tenantId, sku.secret) are not kept.
     expect(snap?.resources[0]).not.toHaveProperty('tenantId');
     expect(snap?.resources[0]?.sku).toEqual({ name: 'Standard_D2s_v5' });
@@ -452,9 +454,7 @@ describe('inventory index: the resolver is served from the snapshot', () => {
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AppError);
     expect((err as AppError).code).toBe('AmbiguousResource');
-    expect((err as AppError).message).toContain(
-      'rg-app/microsoft.storage/storageaccounts/stshared (subscription prod-app)',
-    );
+    expect((err as AppError).message).toContain('rg-app/storageAccounts/stshared (subscription prod-app)');
     expectNoLeak((err as AppError).message);
     expect(queries()).toEqual(['index']);
   });

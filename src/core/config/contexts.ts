@@ -4,9 +4,9 @@ import { z } from 'zod';
 
 // z.guid(), not z.uuid(): RFC version bits would reject the fake IDs used in docs and tests (R7).
 const GUID = z.guid();
-const ALIAS = z
-  .string()
-  .regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'alias must be lowercase kebab-case (max 40 chars)');
+/** Context and subscription aliases. Tool inputs reuse it (`core/mcp/input-schemas.ts`). */
+export const ALIAS_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const ALIAS = z.string().regex(ALIAS_PATTERN, 'alias must be lowercase kebab-case (max 40 chars)');
 
 const ContextSchema = z.object({
   tenantId: GUID,

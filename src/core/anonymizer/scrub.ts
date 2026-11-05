@@ -109,27 +109,49 @@ const quoted = (value: string): string =>
   value.startsWith('"') ? `"${REDACTED}"` : value.startsWith("'") ? `'${REDACTED}'` : REDACTED;
 
 /**
- * `/subscriptions/<sub>/resourceGroups/<rg>/providers/<ns>/<type>/<name>[/<childType>/<child>]`
- * → `<rg>/<type>/<name>[/<childType>/<child>]` (names only, no IDs).
+ * The type/name pairs after the first `providers`, every `providers/<namespace>` pair dropped:
+ * `…/providers/Microsoft.Compute/virtualMachines/vm/providers/Microsoft.Insights/x/y`
+ * → `virtualMachines/vm/x/y`.
  */
-export function shortenArmId(armId: string, p: Pseudonymizer): string {
+function typeNamePairs(segments: readonly string[], from: number): string[] {
+  const out: string[] = [];
+  for (let i = from; i < segments.length; i++) {
+    if (segments[i]?.toLowerCase() === 'providers') {
+      i++;
+      continue;
+    }
+    out.push(segments[i] ?? '');
+  }
+  return out;
+}
+
+/**
+ * THE ref format, shared by every feature (#53): `<rg>/<type>/<name>[/<childType>/<child>]`.
+ * Names only, no namespace and no ID. `undefined` when `armId` has no resource group.
+ */
+export function armRef(armId: string): string | undefined {
   const segments = armId.split('/').filter(Boolean);
   const lower = segments.map((s) => s.toLowerCase());
-
   const rgIdx = lower.indexOf('resourcegroups');
-  const provIdx = lower.indexOf('providers');
+  const rg = rgIdx === -1 ? undefined : segments[rgIdx + 1];
+  if (rg === undefined) return undefined;
+  const provIdx = lower.indexOf('providers', rgIdx + 2);
+  return [rg, ...(provIdx === -1 ? [] : typeNamePairs(segments, provIdx))].join('/');
+}
 
-  if (rgIdx === -1) {
-    // Subscription-scoped ID: keep only the subscription alias/pseudonym.
-    const sub = segments[1] ?? '';
-    const rest = provIdx === -1 ? [] : segments.slice(provIdx + 2);
-    return [`sub:${p.pseudonym('id', sub)}`, ...rest].join('/');
-  }
-
-  const rg = segments[rgIdx + 1] ?? '';
-  // After "providers/<namespace>" come alternating type/name pairs.
-  const tail = provIdx === -1 ? [] : segments.slice(provIdx + 2);
-  return [rg, ...tail].join('/');
+/**
+ * `/subscriptions/<sub>/resourceGroups/<rg>/providers/<ns>/<type>/<name>[/<childType>/<child>]`
+ * → `<rg>/<type>/<name>[/<childType>/<child>]` (`armRef`). A subscription-scoped ID keeps only
+ * the subscription alias or pseudonym: `sub:<alias>/<type>/<name>`.
+ */
+export function shortenArmId(armId: string, p: Pseudonymizer): string {
+  const ref = armRef(armId);
+  if (ref !== undefined) return ref;
+  const segments = armId.split('/').filter(Boolean);
+  const provIdx = segments.findIndex((s) => s.toLowerCase() === 'providers');
+  const sub = segments[1] ?? '';
+  const rest = provIdx === -1 ? [] : typeNamePairs(segments, provIdx);
+  return [`sub:${p.pseudonym('id', sub)}`, ...rest].join('/');
 }
 
 /**

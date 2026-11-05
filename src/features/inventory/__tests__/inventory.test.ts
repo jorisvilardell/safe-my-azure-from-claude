@@ -149,23 +149,27 @@ describe('inventory feature', () => {
       ['email', v.OWNER_EMAIL],
       ['JWT', v.FAKE_ID_TOKEN],
     ])('never cuts a %s that straddles the tag value cap', async (_label, secret) => {
-      for (const shift of [-8, -1, 0, 1, 8]) {
-        const prefix = 'x'.repeat(MAX_TEXT_LENGTH - Math.floor(secret.length / 2) + shift);
-        const { call } = setup([
-          {
-            id: `/subscriptions/${SUB_APP}/resourceGroups/rg-app`,
-            name: 'rg-app',
-            location: 'westeurope',
-            subscriptionId: SUB_APP,
-            tags: { env: `${prefix.slice(0, 10)} ${prefix.slice(10)} ${secret} end` },
-          },
-        ]);
-        const body = parseToolText(await call('list_resource_groups')) as {
-          resourceGroups: { tags: Record<string, string> }[];
-        };
-        const env = body.resourceGroups[0]?.tags.env ?? '';
-        expect(env.length).toBeLessThanOrEqual(MAX_TEXT_LENGTH);
-        expect(env).not.toContain(secret.slice(0, 6));
+      // Glued to the previous word by a non-space separator too: the whole word goes, never a part.
+      for (const glue of [' ', '/', ',', '=', ':']) {
+        for (const shift of [-8, -1, 0, 1, 8]) {
+          const prefix = 'x'.repeat(MAX_TEXT_LENGTH - Math.floor(secret.length / 2) + shift);
+          const { call } = setup([
+            {
+              id: `/subscriptions/${SUB_APP}/resourceGroups/rg-app`,
+              name: 'rg-app',
+              location: 'westeurope',
+              subscriptionId: SUB_APP,
+              tags: { env: `${prefix.slice(0, 10)} ${prefix.slice(10)}${glue}${secret} end` },
+            },
+          ]);
+          const body = parseToolText(await call('list_resource_groups')) as {
+            resourceGroups: { tags: Record<string, string> }[];
+          };
+          const env = body.resourceGroups[0]?.tags.env ?? '';
+          expect(env.length).toBeLessThanOrEqual(MAX_TEXT_LENGTH);
+          expect(env).not.toContain(secret.slice(0, 6));
+          expect(env).not.toContain(secret.slice(-6));
+        }
       }
     });
 
@@ -279,7 +283,8 @@ describe('inventory feature', () => {
 
     it.each([
       ['name', "x' or 1==1 //"],
-      ['name', 'a'.repeat(129)],
+      ['name', 'a'.repeat(261)],
+      ['name', 'rg-app/vm-web-01'],
       ['type', 'Microsoft.Compute/virtualMachines | take 1'],
       ['resourceGroup', 'rg app'],
       ['location', 'west europe'],

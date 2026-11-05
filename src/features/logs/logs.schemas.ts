@@ -1,23 +1,14 @@
 import { z } from 'zod';
+import { ResourceGroupName, ResourceName, SubscriptionAlias as SUBSCRIPTION } from '../../core/mcp/index.js';
 import { KQL_MAX_QUERY_LENGTH } from '../../core/safety/index.js';
 
-const SUBSCRIPTION = z
-  .string()
-  .min(1)
-  .max(64)
-  .describe('Subscription alias, as listed by list_contexts. Omit to search every subscription.');
+const WORKSPACE = ResourceName.describe(
+  'Workspace or Application Insights NAME, as listed by list_workspaces.',
+);
 
-const WORKSPACE = z
-  .string()
-  .min(1)
-  .max(260)
-  .describe('Workspace or Application Insights NAME, as listed by list_workspaces.');
-
-const RESOURCE_GROUP = z
-  .string()
-  .min(1)
-  .max(90)
-  .describe('Resource group of the workspace. Only needed when the name is ambiguous.');
+const RESOURCE_GROUP = ResourceGroupName.describe(
+  'Resource group of the workspace. Only needed when the name is ambiguous.',
+);
 
 const TIMESPAN = z
   .string()

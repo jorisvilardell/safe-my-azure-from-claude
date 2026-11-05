@@ -94,9 +94,22 @@ export function isPublicIp(ip: string): boolean {
   return v6 !== undefined && !isKeptIPv6(v6);
 }
 
+/** `public-ip-<name>` placeholder: the resource name of one of our Public IP resources. */
+export const PUBLIC_IP_NAME_PLACEHOLDER = /^public-ip-([\w.-]{1,80})$/;
+
+/**
+ * The name comes from the ACTIVE context's inventory snapshot, so it is shown only while that
+ * snapshot is fresh: just after login (before the first build lands), over the inventory cap or
+ * in another context, the same IP shows as `public-ip-external-NNN` (#53, docs/SECURITY.md).
+ * Both placeholders resolve to the same IP: `public-ip-<name>` is bound in the pseudonymizer
+ * so `pseudonymizer.resolve()` maps it back (metrics filters).
+ */
 function placeholder(canonical: string, p: Pseudonymizer, index: PublicIpIndex | undefined): string {
   const name = index?.lookup(canonical);
-  if (name !== undefined && SAFE_RESOURCE_NAME.test(name)) return `public-ip-${name}`;
+  if (name !== undefined && SAFE_RESOURCE_NAME.test(name)) {
+    const named = `public-ip-${name}`;
+    if (p.bind(canonical, named)) return named;
+  }
   return p.pseudonym('public-ip-external', canonical);
 }
 

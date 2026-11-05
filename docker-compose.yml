@@ -5,7 +5,8 @@ services:
     container_name: azure-safe-mcp
     restart: unless-stopped
     ports:
-      # Loopback only — never expose on the LAN.
+      # Loopback only — never expose on the LAN. The safe-azure CLI and the MCP client config
+      # expect 127.0.0.1:8765: change the host port only if you also point them elsewhere.
       - '127.0.0.1:8765:8765'
     volumes:
       # Read-only tenant/subscription alias map. No credentials in it.
@@ -21,6 +22,8 @@ services:
       # Audit trail of tool calls: stderr (default) | file | off.
       AUDIT_LOG: ${AUDIT_LOG:-stderr}
       AUDIT_LOG_FILE: ${AUDIT_LOG_FILE:-}
+      # No PUBLIC_URL (#53): since ADR 0001 the server serves no login page, so no link depends on
+      # the published port. The sign-in link is Microsoft's device-code URL, from `safe-azure login`.
     # Hardening: tokens live in process memory only (AGENTS.md R8).
     read_only: true
     tmpfs:

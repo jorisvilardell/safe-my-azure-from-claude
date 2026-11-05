@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ResourceGroupName, ResourceName, ResourceType, SubscriptionAlias } from '../../core/mcp/index.js';
 
 /** Hard cap on the points one `get_metrics` call returns, across every metric and series. */
 export const MAX_POINTS = 1500;
@@ -27,19 +28,10 @@ export function durationMs(value: string): number | undefined {
 }
 
 const RESOURCE_REF = {
-  subscription: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'subscription must be an alias (lowercase kebab-case)')
-    .optional()
-    .describe('Subscription alias, as listed by list_contexts. Omit to search every subscription.'),
-  resourceGroup: z.string().min(1).max(90).describe('Resource group name.'),
-  name: z.string().min(1).max(260).describe('Resource name.'),
-  type: z
-    .string()
-    .min(1)
-    .max(200)
-    .optional()
-    .describe('ARM type, e.g. Microsoft.Compute/virtualMachines. Needed only when the name is ambiguous.'),
+  subscription: SubscriptionAlias.optional(),
+  resourceGroup: ResourceGroupName,
+  name: ResourceName,
+  type: ResourceType.optional(),
 };
 
 /** Metric names go into a comma-separated query parameter: no comma, no control character. */

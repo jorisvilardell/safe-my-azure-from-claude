@@ -1,5 +1,6 @@
 export { loadEnv, type Env } from './env.js';
 export {
+  ALIAS_PATTERN,
   contextIdAliases,
   loadContexts,
   parseContexts,

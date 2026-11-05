@@ -100,7 +100,10 @@ handler(args, ctx) ──▶ scrub(result) ──▶ JSON text to the AI
    `x-functions-key`, `Ocp-Apim-Subscription-Key`, `api-key`, `AccountKey`, …), plus `sig=`,
    `code=` and `subscription-key=` in query strings. Names are matched with explicit boundaries,
    never `\b`, so `_` and escapes cannot hide them.
-2. **ARM IDs** become `rg/type/name`, or `sub:<alias>/…` when they are subscription-scoped.
+2. **ARM IDs** become `rg/type/name` (no namespace; child and extension resources append their
+   `type/name` pairs), or `sub:<alias>/…` when they are subscription-scoped. Every tool that
+   returns a resource reference (inventory `ref`, alert targets, Advisor targets, Resource Health,
+   ambiguity errors) uses this one format (`armRef()` in `core/anonymizer`).
 3. **GUIDs** become `id-NNN` (or `app-NNN` under `appId`, `clientId`, …), wherever they are:
    glued to `_`, letters or digits (`vm_<guid>`, `<guid>_backup`), and also written as 32 hex
    digits without dashes. Known tenant and subscription IDs become their alias
@@ -129,6 +132,15 @@ Field names drive extra rules (`core/anonymizer/fields.ts`):
 
 Pseudonyms are stable for the life of the process: the same email is always `user-003`, so the
 AI can correlate events without knowing who it is. The reverse map lives only in server memory.
+There is **one** pseudonym map per server process, shared by every context and every MCP client
+(not scoped per context): a pseudonym from one context still resolves after `use_context`, and
+the AI can tell that a value seen in two contexts is the same one, never what it is. The map is
+never persisted: pseudonyms (alert refs included) start over on restart, and an old one no
+longer resolves.
+
+Free text is capped **before** it is scrubbed (mappers run first), so `untrustedText()` cuts at
+whitespace and drops the partial word: a cut never leaves a fragment of a GUID, email or token
+that the scrubber would no longer recognise.
 
 `sanitizeError()` (`core/errors`) keeps the message only for our own `AppError`s, which are written
 to be safe. For anything else, such as an Azure SDK `RestError`, it keeps the HTTP status and a
@@ -438,12 +450,15 @@ instructions`, `you are now`, `system:`, `<|…|>`, tool-call-shaped JSON, …) 
    word `version` (`agent 1.2.3.4 started`) looks like an IPv4 and becomes
    `public-ip-external-NNN`. Documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`,
    `203.0.113.0/24`) are treated as public on purpose. Masked values cannot be used in KQL filters;
-   in `get_metrics` filters, `id-`/`user-`/`app-`/`public-ip-external-` pseudonyms are resolved
-   back server-side.
-6. **Public IP index lag.** The `public-ip-<name>` lookup is built from Resource Graph in the
-   background, refreshed every 5 minutes (30 seconds after a failure) and rebuilt on context switch.
-   Until it is ready, or for an IP created since the last refresh, your own IP shows as
-   `public-ip-external-NNN`, and the same IP may later show as `public-ip-<name>`. The fallback
+   in `get_metrics` filters, `id-`/`user-`/`app-`/`public-ip-external-` pseudonyms and
+   `public-ip-<name>` placeholders are resolved back server-side (`public-ip-<name>` through the
+   active context's inventory snapshot, else through the pseudonym map).
+6. **Public IP index lag.** The `public-ip-<name>` lookup reads the active context's inventory
+   snapshot ([#33](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/33)), built
+   right after login and refreshed in the background before it expires. Until the first build
+   lands, over `INVENTORY_MAX_RESOURCES`, in another context, or for an IP created since the last
+   refresh, your own IP shows as `public-ip-external-NNN`, so the same IP can carry both
+   placeholders over a session. Both resolve to the same IP in `get_metrics` filters. The fallback
    always hides the address.
 7. **Local processes that can read the keys.** `/mcp` and `/admin` need their Bearer keys
    (fixed: the old "no authentication on `/mcp` and `/login`" risk), and the `/login` page is
@@ -456,7 +471,7 @@ instructions`, `you are now`, `system:`, `<|…|>`, tool-call-shaped JSON, …) 
    that mode the server would run as the same user as Claude Code, so the container boundary would
    be gone and the deny rules would become the main control. Docker stays the default.
 9. **Shared state.** Login state, the active context and the pseudonym map are server-wide, shared
-   by every client connected to the server. Pseudonyms reset on restart.
+   by every client and every context (see Layer 3). Pseudonyms reset on restart.
 
 Audit trail ([#13](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/13)): every
 tool call writes one scrubbed JSON line (tool, scrubbed arguments, duration, outcome or error code,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { expectNoLeak } from '../../../../test/helpers/index.js';
-import { Pseudonymizer, REDACTED, scrub, scrubString, shortenArmId } from '../index.js';
+import { armRef, Pseudonymizer, REDACTED, scrub, scrubString, shortenArmId } from '../index.js';
 
 // FAKE identifiers only (AGENTS.md R7).
 const SUB = '00000000-0000-0000-0000-000000000001';
@@ -20,6 +20,38 @@ describe('shortenArmId', () => {
   it('uses the subscription alias for subscription-scoped ids', () => {
     const p = new Pseudonymizer(new Map([[SUB, 'prod-app']]));
     expect(shortenArmId(`/subscriptions/${SUB}`, p)).toBe('sub:prod-app');
+    expect(shortenArmId(`/subscriptions/${SUB}/providers/Microsoft.Advisor/configurations/x`, p)).toBe(
+      'sub:prod-app/configurations/x',
+    );
+  });
+});
+
+// #53 item 4: one ref format for every feature (alerts, inventory, health/advisor, resolver).
+describe('armRef', () => {
+  it.each([
+    [VM_ID, 'rg-web/virtualMachines/vm-web-01'],
+    [
+      `/subscriptions/${SUB}/resourceGroups/rg-data/providers/Microsoft.Sql/servers/sql-01/databases/db-orders`,
+      'rg-data/servers/sql-01/databases/db-orders',
+    ],
+    // Extension resources: every `providers/<namespace>` pair is dropped, the parent is kept.
+    [
+      `${VM_ID}/providers/Microsoft.Insights/diagnosticSettings/diag`,
+      'rg-web/virtualMachines/vm-web-01/diagnosticSettings/diag',
+    ],
+    // A resource group literally named "providers" is still a resource group.
+    [
+      `/subscriptions/${SUB}/resourceGroups/providers/providers/Microsoft.Web/sites/app`,
+      'providers/sites/app',
+    ],
+    [`/subscriptions/${SUB}/resourceGroups/rg-web`, 'rg-web'],
+  ])('%s → %s', (id, ref) => {
+    expect(armRef(id)).toBe(ref);
+    expect(shortenArmId(id, new Pseudonymizer())).toBe(ref);
+  });
+
+  it('is undefined without a resource group', () => {
+    expect(armRef(`/subscriptions/${SUB}`)).toBeUndefined();
   });
 });
 

@@ -89,5 +89,20 @@ describe('public IP index wired into the anonymizer (as in main.ts)', () => {
 
     azure.contexts.use('lab');
     expect(anonymizer.scrubString('from 203.0.113.10')).toBe('from public-ip-external-001');
+    // #53: both placeholders of the IP resolve to it (metrics filters).
+    expect(anonymizer.pseudonymizer.resolve('public-ip-pip-web')).toBe('203.0.113.10');
+    expect(anonymizer.pseudonymizer.resolve('public-ip-external-001')).toBe('203.0.113.10');
+  });
+
+  it('never lets a resource name take over a counter placeholder', async () => {
+    const { azure } = setup();
+    const index = createPublicIpIndex(azure.inventory);
+    await index.refresh();
+    const anonymizer = createAnonymizer({ publicIpIndex: index });
+    expect(anonymizer.scrubString('from 198.51.100.7')).toBe('from public-ip-external-001');
+    // A public IP resource literally named `external-001` must not hijack that placeholder.
+    const p = anonymizer.pseudonymizer;
+    expect(p.bind('203.0.113.99', 'public-ip-external-001')).toBe(false);
+    expect(p.resolve('public-ip-external-001')).toBe('198.51.100.7');
   });
 });

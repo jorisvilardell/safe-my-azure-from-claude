@@ -82,6 +82,11 @@ export interface InventorySnapshot {
   readonly resourceGroups: readonly InventoryEntry[];
   /** Name of the public IP resource holding `ip`. */
   publicIpName(ip: string): string | undefined;
+  /**
+   * Reverse of `publicIpName`: the addresses of the public IP resources named `name`
+   * (case-insensitive). More than one when the name exists in several resource groups.
+   */
+  publicIpAddresses(name: string): readonly string[];
   /** Entries matching every given filter, in snapshot order. */
   find(filter: InventoryFilter): InventoryEntry[];
 }
@@ -216,6 +221,7 @@ export function buildInventorySnapshot(
   const resources: InventoryEntry[] = [];
   const resourceGroups: InventoryEntry[] = [];
   const publicIps = new Map<string, string>();
+  const publicIpsByName = new Map<string, string[]>();
   for (const raw of rows) {
     const entry = toEntry(raw);
     if (entry === undefined) continue;
@@ -226,6 +232,8 @@ export function buildInventorySnapshot(
     resources.push(entry);
     if (entry.ipAddress !== undefined && lower(entry.type) === PUBLIC_IP_TYPE) {
       publicIps.set(entry.ipAddress, entry.name);
+      const key = lower(entry.name);
+      publicIpsByName.set(key, [...(publicIpsByName.get(key) ?? []), entry.ipAddress]);
     }
   }
   return {
@@ -234,6 +242,7 @@ export function buildInventorySnapshot(
     resources,
     resourceGroups,
     publicIpName: (ip) => publicIps.get(ip),
+    publicIpAddresses: (name) => publicIpsByName.get(lower(name)) ?? [],
     find(filter) {
       const isGroup = filter.table === 'resourceGroups';
       return (isGroup ? resourceGroups : resources).filter((e) => matches(e, filter, isGroup));
