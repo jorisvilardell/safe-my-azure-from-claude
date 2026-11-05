@@ -50,3 +50,7 @@ expect_used = "warn"
 lto = "thin"
 strip = true
 codegen-units = 1
+
+# The profile dist (cargo-dist, see dist-workspace.toml) builds release binaries with.
+[profile.dist]
+inherits = "release"

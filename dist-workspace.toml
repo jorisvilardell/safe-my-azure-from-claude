@@ -1,0 +1,45 @@
+[workspace]
+members = ["cargo:cli"]
+
+# Config for 'dist' (https://axodotdev.github.io/cargo-dist). After editing, run `dist generate`
+# to refresh .github/workflows/release.yml. See docs/RELEASING.md.
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.34.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "powershell", "npm"]
+# Target platforms to build apps for (Rust target-triple syntax).
+# Linux uses musl: one static binary that runs on any distro (Alpine, old glibc, WSL), and the CLI
+# only shells out to Docker, so the musl allocator's speed does not matter.
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "aarch64-unknown-linux-musl",
+  "x86_64-unknown-linux-musl",
+  "aarch64-pc-windows-msvc",
+  "x86_64-pc-windows-msvc",
+]
+# Ship the axoupdater-based `safe-azure-update` binary and an install receipt with the
+# shell/powershell installers; `safe-azure update` relies on the receipt.
+install-updater = true
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# The npm package is `safe-azure`, so `npx safe-azure` works (needs the NPM_TOKEN secret)
+npm-package = "safe-azure"
+# Publish jobs to run in CI
+publish-jobs = ["npm"]
+# Run before any binary is built: the tag/version lock check, and the server image, so that every
+# released CLI version has its image (image_ref() = ghcr.io/...:CARGO_PKG_VERSION).
+plan-jobs = ["./release-version-check", "./release-image"]
+# Which actions to run on pull requests. release-dry-run.yml covers PRs that touch the release.
+pr-run-mode = "skip"
+
+# Build Windows arm64 natively instead of cross-compiling with cargo-xwin in a container
+[dist.github-custom-runners]
+aarch64-pc-windows-msvc = "windows-11-arm"
+
+[dist.github-custom-job-permissions]
+release-version-check = { contents = "read" }
+release-image = { contents = "read", packages = "write" }

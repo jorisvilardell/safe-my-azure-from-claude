@@ -63,6 +63,14 @@ jobs:
       - run: cargo test --locked
       - run: cargo build --release --locked
 
+  # ADR 0001 §7: the CLI version is the image tag, so package.json and cli/Cargo.toml must agree.
+  version-lock:
+    name: package.json and cli/Cargo.toml versions match
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: node scripts/bump-version.mjs --check
+
   leak-guard:
     name: No real Azure identifiers committed
     runs-on: ubuntu-latest

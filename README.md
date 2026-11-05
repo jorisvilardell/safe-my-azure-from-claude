@@ -29,7 +29,40 @@ investigate Azure alerts and incidents **without sending credentials or identifi
 
 Every tool, with its inputs, is in the [tool reference](./docs/USAGE.md#7-tool-reference).
 
-## Quick start
+## Install
+
+Requires Docker Desktop (or Docker Engine) and Claude Code. One command installs the `safe-azure` CLI:
+
+```powershell
+# Windows (x64, arm64)
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/jorisvilardell/safe-my-azure-from-claude/releases/latest/download/safe-azure-installer.ps1 | iex"
+```
+
+```bash
+# Linux and macOS (x64, arm64)
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jorisvilardell/safe-my-azure-from-claude/releases/latest/download/safe-azure-installer.sh | sh
+
+# Or, with Node.js
+npx safe-azure --help
+```
+
+Then let it set everything up: it pulls the server image of the same version, starts it hardened
+on `127.0.0.1`, and registers it with Claude Code.
+
+```bash
+safe-azure install
+```
+
+To update the CLI, the server image and the Claude Code integration together:
+
+```bash
+safe-azure update           # update --check only reports
+```
+
+Releases are built from one tag (see [docs/RELEASING.md](./docs/RELEASING.md)): the CLI version is
+always the server image tag, `ghcr.io/jorisvilardell/safe-my-azure-from-claude:<version>`.
+
+## Quick start (from source)
 
 Requires Docker Desktop (or Docker Engine with Compose v2) and Claude Code.
 
@@ -48,6 +81,7 @@ ask Claude: _"what fired in the last hour?"_ The `safe-azure` CLI is tracked in
 - **[docs/USAGE.md](./docs/USAGE.md)**: install, `contexts.yaml`, login, switching contexts, tool reference, walkthroughs, troubleshooting.
 - **[docs/SECURITY.md](./docs/SECURITY.md)**: threat model, what the AI can and cannot see, RBAC, deny rules, residual risks.
 - **[docs/CLIENTS.md](./docs/CLIENTS.md)**: Claude Desktop, VS Code, Cursor and other MCP clients.
+- **[docs/RELEASING.md](./docs/RELEASING.md)**: version bump, tag, and what the release workflows publish.
 - **[AGENTS.md](./AGENTS.md)**: architecture, security rules and conventions for contributors, human or AI.
 
 ## Try it without an Azure tenant

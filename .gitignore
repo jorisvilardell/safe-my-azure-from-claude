@@ -20,3 +20,6 @@ audit/
 
 # Rust CLI build output
 cli/target/
+
+# cargo-dist output (dist build)
+/target/
