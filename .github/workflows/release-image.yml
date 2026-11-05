@@ -1,7 +1,17 @@
-# The server image for a release. Called by release.yml (dist `plan-jobs`) on a vX.Y.Z tag, before
-# any binary is built and long before the GitHub Release exists, so the CLI's image_ref()
-# (ghcr.io/jorisvilardell/safe-my-azure-from-claude:CARGO_PKG_VERSION) always points at an image
-# that exists. release-dry-run.yml calls it with push: false.
+# The server image for a release: build, scan with Trivy, then publish to GHCR.
+#
+# Triggers:
+# - On a vX.Y.Z tag, release.yml (dist `plan-jobs`) calls it before any binary is built and long
+#   before the GitHub Release exists, so the CLI's image_ref()
+#   (ghcr.io/jorisvilardell/safe-my-azure-from-claude:CARGO_PKG_VERSION) always points at an image
+#   that exists.
+# - On a GitHub Release published by hand (UI or `gh release create` with your own token), it runs
+#   on its own and (re)publishes that tag's image. Releases created by release.yml use
+#   GITHUB_TOKEN, which never triggers workflows, so a tag never publishes twice.
+# - release-dry-run.yml calls it with push: false on PRs: build and scan, publish nothing.
+#
+# `publish` needs `scan`: nothing reaches GHCR unless Trivy finds no fixable HIGH or CRITICAL
+# vulnerability in the image or in package-lock.json / cli/Cargo.lock.
 name: Release image
 
 on:
@@ -12,25 +22,123 @@ on:
         required: false
         type: string
       push:
-        description: Push to GHCR (tags only). false builds both platforms and discards the result.
+        description: Push to GHCR (tags only). false builds and scans, and discards the result.
         required: false
         type: boolean
         default: true
+  release:
+    types: [published]
 
 permissions:
   contents: read
 
 env:
   IMAGE: ghcr.io/jorisvilardell/safe-my-azure-from-claude
-  PUSH: ${{ inputs.push && github.ref_type == 'tag' }}
+  # A release event has no inputs; a workflow_call from release.yml passes push (default true).
+  PUSH: ${{ (github.event_name == 'release' || inputs.push) && github.ref_type == 'tag' }}
+  TRIVY_VERSION: v0.76.0
 
 jobs:
-  image:
+  scan:
+    name: Trivy scan (image and lockfiles)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # SARIF upload to code scanning
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4
+      # linux/amd64 only, loaded into the local Docker daemon for Trivy. The publish job rebuilds
+      # both platforms from the same cache, so the scanned layers are the published ones.
+      - name: Build image for scanning
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: safe-azure:scan
+          cache-from: |
+            type=gha,scope=image-amd64
+            type=gha,scope=image-multi
+            type=gha
+          cache-to: type=gha,mode=max,scope=image-amd64
+      # Pinned by commit: release tags of this action were rewritten in a past supply-chain attack.
+      - name: Trivy image report (SARIF)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          image-ref: safe-azure:scan
+          scanners: vuln,secret
+          skip-dirs: /app/node_modules
+          format: sarif
+          output: trivy-image.sarif
+          exit-code: '0'
+      - name: Trivy lockfile report (SARIF)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          skip-setup-trivy: true
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          skip-dirs: node_modules,cli/target,dist,coverage
+          format: sarif
+          output: trivy-fs.sarif
+          exit-code: '0'
+      - name: Upload image results to code scanning
+        if: ${{ !cancelled() && hashFiles('trivy-image.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+      - name: Upload lockfile results to code scanning
+        if: ${{ !cancelled() && hashFiles('trivy-fs.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-lockfiles
+      # The gates. --ignore-unfixed: a CVE with no fixed version can't be acted on and would block
+      # every release until upstream ships a fix; it still shows in code scanning above.
+      - name: 'Gate: image has no fixable HIGH/CRITICAL vulnerability or secret'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          skip-setup-trivy: true
+          image-ref: safe-azure:scan
+          scanners: vuln,secret
+          skip-dirs: /app/node_modules
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: '1'
+      - name: 'Gate: lockfiles have no fixable HIGH/CRITICAL vulnerability'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          skip-setup-trivy: true
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          skip-dirs: node_modules,cli/target,dist,coverage
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: '1'
+
+  publish:
     name: Docker image (linux/amd64, linux/arm64)
+    needs: scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    # A hand-published release and a re-run for the same tag never push at the same time.
+    concurrency:
+      group: release-image-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
         with:
@@ -74,5 +182,7 @@ jobs:
           annotations: ${{ steps.meta.outputs.annotations }}
           provenance: mode=max
           sbom: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=image-multi
+            type=gha,scope=image-amd64
+          cache-to: type=gha,mode=max,scope=image-multi

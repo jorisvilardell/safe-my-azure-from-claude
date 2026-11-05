@@ -18,6 +18,26 @@ git tag v1.2.3
 git push origin v1.2.3
 ```
 
+## Tag format
+
+Release tags are `vX.Y.Z` or `vX.Y.Z-(alpha|beta|rc).N` (for example `v1.2.3`, `v1.2.3-rc.1`).
+Two layers enforce it:
+
+- **Repository rulesets** (Settings → Rules → Rulesets). `tag-names` refuses to create any tag
+  that doesn't match `v[0-9]*.[0-9]*.[0-9]*`. `release-tags-immutable` stops any `v*` tag from
+  being deleted, moved or force-pushed, so a released version always points at the same commit.
+  GitHub only offers the exact-regex tag rule (`tag_name_pattern`) on organization plans, so the
+  rulesets use globs.
+- **The exact regex** in `release-version-check.yml` and `scripts/bump-version.mjs`. A tag that
+  passes the glob but not the regex fails the release before anything is built:
+
+  ```text
+  ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$
+  ```
+
+A failed pre-release tag can't be deleted while `release-tags-immutable` is active. Bump to the
+next `-rc.N` instead, or disable the ruleset for the deletion.
+
 A suffix such as `v1.2.3-rc.1` makes a pre-release: GitHub marks it as such, npm does not get it,
 and the image gets `:1.2.3-rc.1` but not `:latest`.
 
@@ -33,10 +53,15 @@ from `dist-workspace.toml`. Don't edit it by hand: change `dist-workspace.toml`,
 1. **plan**: `dist` computes what to build from the tag.
 2. **release-version-check** (`release-version-check.yml`): fails unless the tag is
    `v<package.json version>` and `v<cli/Cargo.toml version>`. Nothing is built otherwise.
-3. **release-image** (`release-image.yml`): builds `Dockerfile` for `linux/amd64` and `linux/arm64`
-   and pushes `ghcr.io/jorisvilardell/safe-my-azure-from-claude:X.Y.Z` and `:latest`, with OCI
-   labels, an SBOM and provenance. It runs before any binary is built, so every released CLI
-   finds its image.
+3. **release-image** (`release-image.yml`), two jobs. It runs before any binary is built, so
+   every released CLI finds its image.
+   - **scan**: builds the `linux/amd64` image with Buildx and scans it with
+     [Trivy](https://trivy.dev) (vulnerabilities and secrets), then scans `package-lock.json` and
+     `cli/Cargo.lock`. Results go to the Security tab (code scanning). Any **fixable** HIGH or
+     CRITICAL finding fails the job. Unfixed CVEs are reported but don't block.
+   - **publish** (`needs: scan`): builds `linux/amd64` and `linux/arm64` from the same Buildx
+     cache and pushes `ghcr.io/jorisvilardell/safe-my-azure-from-claude:X.Y.Z` (and `:latest`
+     for a final release), with OCI labels, an SBOM and provenance.
 4. **build-local-artifacts**: one native runner per target builds `safe-azure` and its
    `safe-azure-update` updater: Windows x64/arm64 (MSVC), macOS x64/arm64, Linux x64/arm64 (musl,
    static, so it runs on any distro).
@@ -45,6 +70,20 @@ from `dist-workspace.toml`. Don't edit it by hand: change `dist-workspace.toml`,
 6. **host**: creates the GitHub Release with all of the above.
 7. **publish-npm**: `npm publish` of `safe-azure` (skipped for pre-releases).
 8. **announce**.
+
+`release-image.yml` also runs on its own when a GitHub Release is **published by hand** (UI or
+`gh release create` with your own token), and (re)publishes that tag's image after the same scan.
+The release that `release.yml` creates uses `GITHUB_TOKEN`, which never triggers other
+workflows, so a normal tag publishes the image once.
+
+## Caching
+
+- **Image**: Buildx with the GitHub Actions cache. The scan job writes scope `image-amd64`, the
+  publish job reads it and writes `image-multi` (both platforms), and both read the default scope
+  CI's `docker` job fills on `main`. `npm ci` in the `Dockerfile` uses a BuildKit cache mount.
+- **Trivy**: its vulnerability database is cached by `trivy-action`.
+- **CLI binaries**: `cache-builds = true` in `dist-workspace.toml` adds `Swatinem/rust-cache`
+  (cargo registry and `target/`, keyed per target) to every `build-local-artifacts` job.
 
 Install URLs always point at the latest release:
 
@@ -63,8 +102,9 @@ The shell and PowerShell installers drop `safe-azure-update` next to `safe-azure
 
 `release-dry-run.yml` runs on pull requests that touch `cli/**`, `Dockerfile`,
 `dist-workspace.toml`, `scripts/bump-version.mjs` or a release workflow. It runs `dist plan`,
-`dist build` for Linux x64 (binary, updater, installers, npm package), and builds the image for
-both platforms without pushing. Other PRs skip it.
+`dist build` for Linux x64 (binary, updater, installers, npm package), and runs
+`release-image.yml` with `push: false`: the Trivy scan (which fails the PR on a fixable HIGH or
+CRITICAL finding) and the two-platform build, without pushing. Other PRs skip it.
 
 Locally, with [dist](https://github.com/axodotdev/cargo-dist/releases) installed:
 
@@ -79,11 +119,15 @@ dist build --artifacts=all --target=x86_64-pc-windows-msvc   # or your host targ
   (`https://github.com/users/jorisvilardell/packages/container/safe-my-azure-from-claude/settings`)
   and set its visibility to **Public**, so `docker pull` works without a login. New packages are
   private by default.
-- **npm.** Create an npm automation (or granular, publish-only) token for the `safe-azure`
-  package and save it as the repository secret `NPM_TOKEN`. Without it, `publish-npm` fails and
+- **npm.** Create a granular access token with **Read and write** on packages and save it as
+  the repository secret `NPM_TOKEN`. Until the first release publishes `safe-azure`, the token
+  can't be limited to that package (it doesn't exist yet), so scope it to all packages, then
+  narrow it to `safe-azure` after the first publish. If your npm account enforces 2FA for
+  writes, tick **Bypass two-factor authentication**, or `npm publish` fails in CI. Without it, `publish-npm` fails and
   the release is not announced; the GitHub Release and the image are already out by then.
-- **Actions permissions.** Settings → Actions → General → Workflow permissions must allow the
-  workflow to request `contents: write` (the release) and `packages: write` (the image); the
-  workflows ask for them explicitly.
+- **Actions permissions.** The repository default can stay read-only: every job asks for what it
+  needs (`contents: write` for the release, `packages: write` for the image,
+  `security-events: write` for Trivy results).
+- **Tag rulesets.** `tag-names` and `release-tags-immutable` (see [Tag format](#tag-format)).
 - **Upgrading cargo-dist.** Bump `cargo-dist-version` in `dist-workspace.toml`, run
   `dist generate`, and commit the regenerated `release.yml`. Dependabot skips that file on purpose.

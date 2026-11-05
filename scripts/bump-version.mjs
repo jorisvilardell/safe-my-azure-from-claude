@@ -12,7 +12,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CRATE = 'safe-azure';
-const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+// Same format as the tag check in release-version-check.yml: X.Y.Z or X.Y.Z-(alpha|beta|rc).N.
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:alpha|beta|rc)\.(0|[1-9]\d*))?$/;
 
 const file = (rel) => join(ROOT, rel);
 const read = (rel) => readFileSync(file(rel), 'utf8');
@@ -87,7 +88,7 @@ const isCheck = args[0] === '--check';
 const version = isCheck ? args[1] : args[0];
 if (version !== undefined) {
   const bare = version.replace(/^v/, '');
-  if (!SEMVER.test(bare)) fail(`"${version}" is not a version like 1.2.3`);
+  if (!SEMVER.test(bare)) fail(`"${version}" is not a version like 1.2.3 or 1.2.3-rc.1`);
   if (isCheck) check(bare);
   else bump(bare);
 } else if (isCheck) {
