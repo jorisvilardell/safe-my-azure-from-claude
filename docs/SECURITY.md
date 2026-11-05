@@ -302,6 +302,65 @@ Important limits:
 - If your host is signed in to the Azure CLI or Azure PowerShell, the AI's shell can use those
   sessions. Sign out of them, or keep them on a different account, when you work with the AI.
 
+### Claude Code guard
+
+Deny rules are guidance. The real enforcement is a `PreToolUse` hook that `safe-azure install`
+merges into the **user** settings (`~/.claude/settings.json`), so it applies in every project
+([ADR 0001 §5](./adr/0001-cli-auth-install.md)). The entry is:
+
+```json
+{
+  "matcher": "*",
+  "hooks": [{ "type": "command", "command": "<path to safe-azure> hook claude", "timeout": 10 }]
+}
+```
+
+The install keeps every other key and hook and backs the file up to
+`settings.json.safe-azure.bak`. It refuses a file that is not valid JSON. Running it again is a
+no-op, or updates the path when the binary moved. `safe-azure uninstall` removes only this entry.
+
+`safe-azure hook claude` reads the event on stdin. It blocks a call with exit code 2 and a reason
+on stderr that tells the agent what to do instead. It prints nothing on stdout. It blocks:
+
+| Tool                                                               | Blocked                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Bash`, `PowerShell`, any tool with a `command`                    | `safe-azure login\|keys\|install\|uninstall\|update\|down`; **every** `az` command (it can mint tokens and prints raw IDs); `azd auth`; Azure PowerShell cmdlets (`Get-AzAccessToken`, `Connect-AzAccount`, …); `docker`/`podman` `exec\|cp\|inspect\|logs\|attach\|export\|commit\|diff\|top\|debug` on **any** container, and any other `docker` command naming `azure-safe-mcp` except `ps`/`stats`/`images` |
+|                                                                    | Any command with port `8765` and a loopback host (`localhost`, `127.*`, `::1`, `0.0.0.0`, `2130706433`, `/dev/tcp/…`) or an HTTP client or interpreter (`curl`, `wget`, `iwr`, `irm`, `Invoke-WebRequest`, `Invoke-RestMethod`, `nc`, `node`, `python`, `fetch`, `WebClient`, …)                                                                                                                                |
+|                                                                    | Any mention of `.azure`, `.IdentityService`, MSAL cache files, `keys.bin`, the safe-azure config dir (`%APPDATA%\safe-azure`, `~/.config/safe-azure`), `contexts.yaml`, `.claude/settings*`, `disableAllHooks`; `powershell -EncodedCommand`; base64-decode-then-run pipelines                                                                                                                                  |
+| `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `LS`         | Paths under `.azure`, the config dir, `keys.bin`, `contexts.yaml`. Write tools also: `.claude/settings*.json` and `~/.claude/skills/safe-azure/`                                                                                                                                                                                                                                                                |
+| `Glob`, `Grep`                                                     | The same paths in `path`, `pattern` (Glob) or `glob`. A `Grep` whose scope contains `~/.azure` or the config dir (the home directory, `C:/Users`, `/`)                                                                                                                                                                                                                                                          |
+| `WebFetch`                                                         | Loopback URLs on port 8765                                                                                                                                                                                                                                                                                                                                                                                      |
+| Malformed event, or a known tool without its expected string field | Everything (fail closed). Unknown tools without a `command` pass.                                                                                                                                                                                                                                                                                                                                               |
+
+`docker exec` and friends are blocked for every container, not only `azure-safe-mcp`: the target
+can be a container ID, a name prefix, a compose service name or `$(docker ps -q)`, so matching on
+the name would be easy to evade. Matching is coarse on purpose: it lowercases the command, drops
+quotes, `^` and escapes, splits on `;`, `&&`, `||`, `|`, newlines, `$(…)` and backticks, and looks
+for the words anywhere in a segment. So `bash -c '…'`, `cmd /c …`, `powershell -c …`, full paths
+(`C:\…\az.cmd`) and `"a"z`-style quoting are caught. The price is false positives: a commit
+message that says `az login` or a `grep` for `127.0.0.1:8765` is blocked too, and the agent has to
+rephrase.
+
+Known limits. The hook raises the bar; it is not a sandbox:
+
+- **Indirection it cannot see:** a command name or port built at run time (`X=az; $X login`,
+  `& ('a'+'z')`, `$((8000+765))`, an alias or function defined earlier, a script file the agent
+  wrote and then runs, `Invoke-Expression` on a computed string, other encodings than base64).
+- **Other programs:** any binary the agent writes or downloads, other CLIs that hold Azure tokens
+  (Terraform, VS Code, the Azure SDKs reading `~/.azure` from inside a script it wrote), symlinks
+  to protected paths, and a Bash `grep -r` over the home directory.
+- **Same-user access:** the agent runs as you. Anything you can read, a process it starts can read
+  with enough effort. DPAPI protects `keys.bin` from plain reads, and `safe-azure login` refuses to
+  run without a TTY, as defence in depth.
+- **Other clients:** the hook only guards Claude Code. Other MCP clients need their own controls
+  ([CLIENTS.md](./CLIENTS.md)).
+- **Timeouts and old versions:** if the hook times out (10 s) or cannot start, Claude Code lets the
+  call through. Run `safe-azure doctor` after moving the binary.
+
+The companion skill (`~/.claude/skills/safe-azure/SKILL.md`, installed by `safe-azure install`)
+tells the agent the same rules up front and gives it the investigation playbook, so the hook
+rarely has to fire.
+
 ## 8. Residual risks
 
 Stated plainly, so you can decide what to point this server at.
