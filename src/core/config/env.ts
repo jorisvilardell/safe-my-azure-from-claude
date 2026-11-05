@@ -16,6 +16,14 @@ const EnvSchema = z
      */
     KEYS_FILE: z.string().min(1).default(DEFAULT_KEYS_FILE),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    /**
+     * `device-code` (default, Docker). `broker`: native Windows only, sign-in through WAM (#15).
+     * Weaker isolation, see docs/WINDOWS.md.
+     */
+    AUTH_MODE: z.preprocess(
+      (v) => (v === '' ? undefined : v),
+      z.enum(['device-code', 'broker']).default('device-code'),
+    ),
     /** In-memory inventory index cap, per context. Over it, tools query live. 0 disables the index. */
     INVENTORY_MAX_RESOURCES: z.coerce.number().int().min(0).max(1_000_000).default(50_000),
     /**

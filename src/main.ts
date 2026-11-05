@@ -8,14 +8,32 @@ import {
   createContextStore,
   createCredentialManager,
   createPublicIpIndex,
+  loadCredentialFactory,
+  type AuthMode,
+  type CredentialFactory,
 } from './core/azure/index.js';
 import { contextIdAliases, loadContexts, loadEnv } from './core/config/index.js';
+import { AppError } from './core/errors/index.js';
 import type { ToolContext } from './core/mcp/index.js';
 import { createAuditLog, createLogger, silenceAzureSdkLogging } from './core/logging/index.js';
 
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
   version: string;
 };
+
+/**
+ * A misconfigured AUTH_MODE=broker must say what is wrong. Its AppError messages are fixed text
+ * (no path, no SDK output), so they are the one startup error printed as is.
+ */
+async function loadAuthFactory(mode: AuthMode): Promise<CredentialFactory> {
+  try {
+    return await loadCredentialFactory(mode);
+  } catch (err) {
+    if (err instanceof AppError) process.stderr.write(`Fatal: ${err.message}\n`);
+    else process.stderr.write('Fatal: could not load the sign-in method (details withheld).\n');
+    process.exit(1);
+  }
+}
 
 async function main(): Promise<void> {
   silenceAzureSdkLogging();
@@ -39,7 +57,12 @@ async function main(): Promise<void> {
     ...(env.AUDIT_LOG_FILE === undefined ? {} : { file: env.AUDIT_LOG_FILE }),
   });
 
-  const credentials = createCredentialManager({ contexts: contexts.contexts, logger });
+  const credentials = createCredentialManager({
+    contexts: contexts.contexts,
+    logger,
+    authMode: env.AUTH_MODE,
+    factory: await loadAuthFactory(env.AUTH_MODE),
+  });
   const store = createContextStore({
     contexts: contexts.contexts,
     isLoggedIn: (alias) => credentials.isLoggedIn(alias),
@@ -75,6 +98,7 @@ async function main(): Promise<void> {
     features: features.length,
     inventoryResource: env.INVENTORY_RESOURCE,
     audit: env.AUDIT_LOG,
+    auth: env.AUTH_MODE,
   });
   const server = startHttpServer({
     host: env.HOST,

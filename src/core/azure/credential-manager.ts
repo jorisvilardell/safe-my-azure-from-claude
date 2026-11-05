@@ -32,6 +32,13 @@ export interface CredentialFactoryOptions {
 export type CredentialFactory = (opts: CredentialFactoryOptions) => LoginCredential;
 
 /**
+ * How a context signs in (`AUTH_MODE`). `device-code` (default, Docker): the user code goes to the
+ * admin API and the human enters it in a browser. `broker` (native Windows only, #15): WAM shows
+ * its own sign-in window on this desktop, and there is no code at all.
+ */
+export type AuthMode = 'device-code' | 'broker';
+
+/**
  * Default public client (no app registration). No `tokenCachePersistenceOptions`: the MSAL
  * cache stays in this object's memory (AGENTS.md R8). `disableAutomaticAuthentication` makes
  * `getToken` fail instead of silently starting a new device-code flow behind a tool call.
@@ -80,7 +87,9 @@ export type AdminLoginState = 'none' | 'pending' | 'succeeded' | 'failed' | 'exp
 
 /** Admin API only (`/admin/*`, human CLI). This is the only interface that hands out a user code. */
 export interface AdminLogins extends LoginController {
-  /** Starts a device-code flow. Throws `AppError('UnknownContext')`. */
+  /** `broker`: a started login never has a user code, the WAM window is the whole flow. */
+  readonly authMode: AuthMode;
+  /** Starts a device-code (or broker) flow. Throws `AppError('UnknownContext')`. */
   startLogin(alias: string): StartLoginResult;
   /** The pending login of a context, with its user code once Entra ID sent it. */
   pendingLogin(alias: string): PendingLogin | undefined;
@@ -103,6 +112,8 @@ export interface CredentialManager extends CredentialProvider, AdminLogins {
 export interface CredentialManagerDeps {
   readonly contexts: Readonly<Record<string, AzureContext>>;
   readonly logger: Logger;
+  /** Must match `factory`: `broker` goes with the factory from `loadCredentialFactory('broker')`. */
+  readonly authMode?: AuthMode;
   readonly factory?: CredentialFactory;
   readonly now?: () => number;
 }
@@ -121,8 +132,9 @@ interface Entry {
 const isAuthRequired = (err: unknown): boolean =>
   err instanceof Error && err.name === 'AuthenticationRequiredError';
 
-/** One in-memory device-code credential per context alias. */
+/** One in-memory credential per context alias (device code by default, WAM in broker mode). */
 export function createCredentialManager(deps: CredentialManagerDeps): CredentialManager {
+  const authMode = deps.authMode ?? 'device-code';
   const factory = deps.factory ?? createDeviceCodeCredential;
   const now = deps.now ?? Date.now;
   const entries = new Map<string, Entry>();
@@ -159,14 +171,20 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
     const entry: Entry = {
       abort,
       loggedIn: false,
-      pending: { alias, state: 'starting' },
+      // Broker: no code will ever come, the WAM window is already up. The same 15-minute cap
+      // applies, so an abandoned window does not keep the context "pending" forever.
+      pending:
+        authMode === 'broker'
+          ? { alias, state: 'waiting', expiresOn: now() + DEVICE_CODE_TTL_MS }
+          : { alias, state: 'starting' },
       tokenExpiresOn: undefined,
       codeWaiters: new Set(),
       credential: factory({
         tenantId,
         onDeviceCode: (info) => {
           // Deliberately not logged: the user code is a login secret (AGENTS.md G1).
-          if (!isCurrent(alias, entry)) return;
+          // Broker mode has no code: if a credential sent one anyway, it is dropped.
+          if (authMode === 'broker' || !isCurrent(alias, entry)) return;
           entry.pending = {
             alias,
             state: 'waiting',
@@ -241,6 +259,8 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
   };
 
   return {
+    authMode,
+
     isLoggedIn: (alias) => loggedInEntry(alias) !== undefined,
 
     getCredential(alias) {

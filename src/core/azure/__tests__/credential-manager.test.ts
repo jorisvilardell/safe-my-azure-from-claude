@@ -283,4 +283,60 @@ describe('createCredentialManager', () => {
       expect(await manager.waitForDeviceCode('prod', 5)).toEqual({ alias: 'prod', state: 'starting' });
     });
   });
+
+  describe('broker mode (AUTH_MODE=broker)', () => {
+    function brokerSetup(now?: () => number) {
+      // The stub sends a device code: broker mode must drop it (a WAM login has none).
+      const stub = createStubLogin();
+      const logs: string[] = [];
+      const manager = createCredentialManager({
+        contexts: FAKE_CONTEXTS,
+        logger: createLogger('debug', { write: (line) => logs.push(line) }),
+        authMode: 'broker',
+        factory: stub.factory,
+        ...(now === undefined ? {} : { now }),
+      });
+      return { stub, logs, manager };
+    }
+
+    it('is off by default', () => {
+      expect(setup().manager.authMode).toBe('device-code');
+      expect(brokerSetup().manager.authMode).toBe('broker');
+    });
+
+    it('reports a started login as pending at once, with no user code, then logs in', async () => {
+      const t = 1_000_000;
+      const { stub, manager, logs } = brokerSetup(() => t);
+      expect(manager.startLogin('prod')).toBe('started');
+      expect(manager.startLogin('prod')).toBe('already-pending');
+      expect(stub.created).toEqual([FAKE_CONTEXTS.prod?.tenantId]);
+
+      const pending = manager.pendingLogin('prod');
+      expect(pending).toEqual({ alias: 'prod', state: 'waiting', expiresOn: t + 15 * 60_000 });
+      expect(await manager.waitForDeviceCode('prod', 5_000)).toEqual(pending);
+      expect(manager.loginState('prod')).toBe('pending');
+      expect(manager.status('prod')).toMatchObject({ loggedIn: false, loginPending: true });
+
+      stub.approve();
+      await flushLogin();
+      expect(manager.isLoggedIn('prod')).toBe(true);
+      expect(manager.loginState('prod')).toBe('succeeded');
+      expect((await manager.getCredential('prod').getToken(ARM_SCOPE))?.token).toBe(FAKE_ACCESS_TOKEN);
+      expect(logs.join('\n')).not.toContain(FAKE_USER_CODE);
+      expect(logs.join('\n')).not.toContain(FAKE_ACCESS_TOKEN);
+    });
+
+    it('marks a cancelled WAM window as failed, and an abandoned one as expired', async () => {
+      let t = 1_000_000;
+      const { stub, manager } = brokerSetup(() => t);
+      manager.startLogin('prod');
+      stub.fail(new Error('user_cancelled'));
+      await flushLogin();
+      expect(manager.loginState('prod')).toBe('failed');
+
+      expect(manager.startLogin('prod')).toBe('started');
+      t += 16 * 60_000;
+      expect(manager.loginState('prod')).toBe('expired');
+    });
+  });
 });

@@ -56,10 +56,12 @@ export {
 } from './inventory-index.js';
 export { createResourceResolver, RESOLVER_TTL_MS, type ResolverDeps } from './resolver.js';
 export { createPublicIpIndex, type PublicIpLookup } from './public-ip-index.js';
+export { loadCredentialFactory, type BrokerLoaderDeps } from './broker-credential.js';
 export {
   ARM_SCOPE,
   createCredentialManager,
   createDeviceCodeCredential,
+  type AuthMode,
   type CredentialFactory,
   type CredentialFactoryOptions,
   type CredentialManager,

@@ -4,10 +4,11 @@
 FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# --omit=optional: @azure/identity-broker (native Windows WAM, AUTH_MODE=broker) is not for the image.
+RUN npm ci --omit=optional
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
-RUN npm run build && npm prune --omit=dev
+RUN npm run build && npm prune --omit=dev --omit=optional
 
 # ---- runtime ----
 FROM node:24-alpine AS runtime

@@ -81,6 +81,7 @@ ask Claude: _"what fired in the last hour?"_ The `safe-azure` CLI is tracked in
 - **[docs/USAGE.md](./docs/USAGE.md)**: install, `contexts.yaml`, login, switching contexts, tool reference, walkthroughs, troubleshooting.
 - **[docs/SECURITY.md](./docs/SECURITY.md)**: threat model, what the AI can and cannot see, RBAC, deny rules, residual risks.
 - **[docs/CLIENTS.md](./docs/CLIENTS.md)**: Claude Desktop, VS Code, Cursor and other MCP clients.
+- **[docs/WINDOWS.md](./docs/WINDOWS.md)**: optional native Windows mode with WAM sign-in (`AUTH_MODE=broker`), weaker isolation than Docker.
 - **[docs/RELEASING.md](./docs/RELEASING.md)**: version bump, tag, and what the release workflows publish.
 - **[AGENTS.md](./AGENTS.md)**: architecture, security rules and conventions for contributors, human or AI.
 

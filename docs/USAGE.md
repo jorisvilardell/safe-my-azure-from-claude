@@ -2,7 +2,9 @@
 
 How to install the server, connect Claude Code to it, sign in, and use it to investigate Azure.
 For what the AI can and cannot see, read [SECURITY.md](./SECURITY.md). For MCP clients other than
-Claude Code, read [CLIENTS.md](./CLIENTS.md).
+Claude Code, read [CLIENTS.md](./CLIENTS.md). To run the server natively on Windows with WAM
+sign-in instead of Docker and device code (optional, weaker isolation), read
+[WINDOWS.md](./WINDOWS.md).
 
 - [1. Install](#1-install)
 - [2. Configure `contexts.yaml`](#2-configure-contextsyaml)
