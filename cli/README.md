@@ -20,3 +20,8 @@ cargo fmt --check
 | `paths.rs`                                                        | shared paths (keep small)                           |
 
 Rules: no `unsafe` (DPAPI calls are wrapped in one module with a justified `#[allow(unsafe_code)]`), no `unwrap`, and every command has tests. Commit rules are the same as the rest of the repo (AGENTS.md §6).
+
+## Environment
+
+- `SAFE_AZURE_NO_UPDATE_CHECK=1` turns off the once-a-day "update available" notice (it is never shown for `mcp` and `hook`).
+- `SAFE_AZURE_GITHUB_TOKEN` is passed to the self-updater when GitHub rate-limits anonymous requests.
