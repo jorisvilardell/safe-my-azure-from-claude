@@ -1,0 +1,599 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/dev-proxy/main/schemas/v3.3.1/mockresponseplugin.mocksfile.schema.json",
+  "mocks": [
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "alerts' and id =~"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 1,
+          "count": 1,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/providers/Microsoft.AlertsManagement/alerts/00000000-0000-0000-0000-0000000000e1",
+              "name": "cpu-high",
+              "properties": {
+                "essentials": {
+                  "severity": "Sev2",
+                  "signalType": "Metric",
+                  "alertState": "New",
+                  "monitorCondition": "Fired",
+                  "monitorService": "Platform",
+                  "targetResource": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+                  "targetResourceName": "vm-web-01",
+                  "targetResourceGroup": "rg-app",
+                  "targetResourceType": "virtualmachines",
+                  "sourceCreatedId": "00000000-0000-0000-0000-0000000000e1",
+                  "smartGroupId": "00000000-0000-0000-0000-0000000000e1",
+                  "alertRule": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Insights/metricAlerts/cpu-high",
+                  "startDateTime": "2026-11-03T08:12:00.000Z",
+                  "lastModifiedDateTime": "2026-11-03T08:12:00.000Z",
+                  "lastModifiedUserName": "alice.ops@contoso.example",
+                  "actionStatus": {
+                    "isSuppressed": false
+                  },
+                  "description": "CPU above 90% for 5 minutes"
+                },
+                "context": {
+                  "context": {
+                    "conditionType": "SingleResourceMultipleMetricCriteria",
+                    "condition": {
+                      "windowSize": "PT5M",
+                      "allOf": [
+                        {
+                          "metricName": "Percentage CPU",
+                          "metricNamespace": "Microsoft.Compute/virtualMachines",
+                          "operator": "GreaterThan",
+                          "threshold": "90",
+                          "timeAggregation": "Average",
+                          "metricValue": 97.4
+                        }
+                      ]
+                    },
+                    "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+                    "portalLink": "https://portal.azure.com/#resource/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "project id, name, essentials"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 1,
+          "count": 1,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/providers/Microsoft.AlertsManagement/alerts/00000000-0000-0000-0000-0000000000e1",
+              "name": "cpu-high",
+              "essentials": {
+                "severity": "Sev2",
+                "signalType": "Metric",
+                "alertState": "New",
+                "monitorCondition": "Fired",
+                "monitorService": "Platform",
+                "targetResource": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+                "targetResourceName": "vm-web-01",
+                "targetResourceGroup": "rg-app",
+                "targetResourceType": "virtualmachines",
+                "alertRule": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Insights/metricAlerts/cpu-high",
+                "startDateTime": "2026-11-03T08:12:00.000Z",
+                "lastModifiedDateTime": "2026-11-03T08:12:00.000Z",
+                "lastModifiedUserName": "alice.ops@contoso.example",
+                "description": "CPU above 90% for 5 minutes"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "microsoft.insights/metricalerts"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 2,
+          "count": 2,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Insights/metricAlerts/cpu-high",
+              "name": "cpu-high",
+              "type": "microsoft.insights/metricalerts",
+              "resourceGroup": "rg-app",
+              "properties": {
+                "description": "CPU above 90% for 5 minutes. Owner: bob.owner@fabrikam.example",
+                "severity": 2,
+                "enabled": true,
+                "scopes": [
+                  "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01"
+                ],
+                "evaluationFrequency": "PT1M",
+                "windowSize": "PT5M",
+                "criteria": {
+                  "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
+                  "allOf": [
+                    {
+                      "criterionType": "StaticThresholdCriterion",
+                      "name": "cpu",
+                      "metricName": "Percentage CPU",
+                      "operator": "GreaterThan",
+                      "threshold": 90,
+                      "timeAggregation": "Average"
+                    }
+                  ]
+                },
+                "actions": [
+                  {
+                    "actionGroupId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/microsoft.insights/actionGroups/ag-oncall"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Insights/activityLogAlerts/vm-restarted",
+              "name": "vm-restarted",
+              "type": "microsoft.insights/activitylogalerts",
+              "resourceGroup": "rg-app",
+              "properties": {
+                "enabled": true,
+                "scopes": ["/subscriptions/00000000-0000-0000-0000-000000000001"],
+                "condition": {
+                  "allOf": [
+                    {
+                      "field": "category",
+                      "equals": "Administrative"
+                    },
+                    {
+                      "field": "operationName",
+                      "equals": "Microsoft.Compute/virtualMachines/restart/action"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "advisorresources"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 1,
+          "count": 1,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "category": "HighAvailability",
+              "impact": "High",
+              "problem": "Use Availability zones for better resiliency and availability",
+              "solution": "Use Availability zones for better resiliency and availability",
+              "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+              "impactedField": "Microsoft.Compute/virtualMachines",
+              "impactedValue": "vm-web-01",
+              "lastUpdated": "2026-11-02T06:00:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "project subscriptionId, state"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 2,
+          "count": 2,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "state": "Enabled"
+            },
+            {
+              "subscriptionId": "00000000-0000-0000-0000-000000000002",
+              "state": "Enabled"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "provisioningState = tostring(properties.provisioningState)"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 2,
+          "count": 2,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "name": "rg-app",
+              "location": "westeurope",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "provisioningState": "Succeeded",
+              "tags": {
+                "env": "prod",
+                "owner": "bob.owner@fabrikam.example"
+              }
+            },
+            {
+              "name": "rg-net",
+              "location": "westeurope",
+              "subscriptionId": "00000000-0000-0000-0000-000000000002",
+              "provisioningState": "Succeeded",
+              "tags": {
+                "env": "prod",
+                "cost-center": "CC-1234"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "customerId = tostring(properties.customerId)"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 2,
+          "count": 2,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.OperationalInsights/workspaces/log-prod",
+              "name": "log-prod",
+              "type": "microsoft.operationalinsights/workspaces",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "location": "westeurope",
+              "customerId": "00000000-0000-0000-0000-0000000000f1",
+              "retentionInDays": 30
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/microsoft.insights/components/appi-api",
+              "name": "appi-api",
+              "type": "microsoft.insights/components",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "location": "westeurope",
+              "customerId": "",
+              "retentionInDays": 90
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "kind, tags, properties"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 1,
+          "count": 1,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+              "name": "vm-web-01",
+              "type": "microsoft.compute/virtualmachines",
+              "location": "westeurope",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "sku": null,
+              "kind": "",
+              "tags": {
+                "owner": "bob.owner@fabrikam.example",
+                "created-by": "alice.ops@contoso.example",
+                "env": "prod"
+              },
+              "properties": {
+                "vmId": "00000000-0000-0000-0000-0000000000e3",
+                "hardwareProfile": {
+                  "vmSize": "Standard_D2s_v5"
+                },
+                "provisioningState": "Succeeded",
+                "osProfile": {
+                  "computerName": "vm-web-01",
+                  "adminUsername": "azureuser",
+                  "customData": "Y29ubmVjdGlvbj1EZWZhdWx0RW5kcG9pbnRzUHJvdG9jb2w9aHR0cHM="
+                },
+                "networkProfile": {
+                  "networkInterfaces": [
+                    {
+                      "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/vm-web-01-nic"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "order by resourceGroup asc, type asc, name asc"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 4,
+          "count": 4,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+              "name": "vm-web-01",
+              "type": "microsoft.compute/virtualmachines",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "location": "westeurope",
+              "sku": null,
+              "kind": "",
+              "tags": {
+                "owner": "bob.owner@fabrikam.example",
+                "env": "prod"
+              }
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Network/publicIPAddresses/pip-web-01",
+              "name": "pip-web-01",
+              "type": "microsoft.network/publicipaddresses",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "location": "westeurope",
+              "sku": {
+                "name": "Standard",
+                "tier": "Regional"
+              },
+              "kind": "",
+              "tags": {
+                "env": "prod"
+              }
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-api",
+              "name": "app-api",
+              "type": "microsoft.web/sites",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "location": "westeurope",
+              "sku": null,
+              "kind": "app,linux",
+              "tags": {
+                "env": "prod",
+                "created-by": "alice.ops@contoso.example"
+              }
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-net/providers/Microsoft.Network/virtualNetworks/vnet-hub",
+              "name": "vnet-hub",
+              "type": "microsoft.network/virtualnetworks",
+              "resourceGroup": "rg-net",
+              "subscriptionId": "00000000-0000-0000-0000-000000000002",
+              "location": "westeurope",
+              "sku": null,
+              "kind": "",
+              "tags": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "isnotempty(properties.ipAddress)"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 1,
+          "count": 1,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "name": "pip-web-01",
+              "ipAddress": "203.0.113.42"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "order by subscriptionId asc, resourceGroup asc, name asc"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 1,
+          "count": 1,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+              "name": "vm-web-01",
+              "type": "microsoft.compute/virtualmachines",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST",
+        "bodyFragment": "order by id asc"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 8,
+          "count": 8,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+              "name": "vm-web-01",
+              "type": "microsoft.compute/virtualmachines",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "location": "westeurope",
+              "tags": {
+                "owner": "bob.owner@fabrikam.example",
+                "env": "prod"
+              }
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Network/publicIPAddresses/pip-web-01",
+              "name": "pip-web-01",
+              "type": "microsoft.network/publicipaddresses",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "location": "westeurope",
+              "sku": {
+                "name": "Standard",
+                "tier": "Regional"
+              },
+              "tags": {
+                "env": "prod"
+              },
+              "ipAddress": "203.0.113.42"
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.OperationalInsights/workspaces/log-prod",
+              "name": "log-prod",
+              "type": "microsoft.operationalinsights/workspaces",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "location": "westeurope"
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/microsoft.insights/components/appi-api",
+              "name": "appi-api",
+              "type": "microsoft.insights/components",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "location": "westeurope",
+              "kind": "web"
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-api",
+              "name": "app-api",
+              "type": "microsoft.web/sites",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "location": "westeurope",
+              "kind": "app,linux",
+              "tags": {
+                "env": "prod",
+                "created-by": "alice.ops@contoso.example"
+              }
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app",
+              "name": "rg-app",
+              "type": "microsoft.resources/subscriptions/resourcegroups",
+              "resourceGroup": "rg-app",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "location": "westeurope",
+              "tags": {
+                "env": "prod",
+                "owner": "bob.owner@fabrikam.example"
+              },
+              "provisioningState": "Succeeded"
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-net/providers/Microsoft.Network/virtualNetworks/vnet-hub",
+              "name": "vnet-hub",
+              "type": "microsoft.network/virtualnetworks",
+              "resourceGroup": "rg-net",
+              "subscriptionId": "00000000-0000-0000-0000-000000000002",
+              "location": "westeurope",
+              "tags": {}
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-net",
+              "name": "rg-net",
+              "type": "microsoft.resources/subscriptions/resourcegroups",
+              "resourceGroup": "rg-net",
+              "subscriptionId": "00000000-0000-0000-0000-000000000002",
+              "location": "westeurope",
+              "tags": {
+                "env": "prod",
+                "cost-center": "CC-1234"
+              },
+              "provisioningState": "Succeeded"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources*",
+        "method": "POST"
+      },
+      "response": {
+        "body": {
+          "totalRecords": 0,
+          "count": 0,
+          "resultTruncated": "false",
+          "facets": [],
+          "data": []
+        }
+      }
+    }
+  ]
+}

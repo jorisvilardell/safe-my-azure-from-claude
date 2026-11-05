@@ -49,6 +49,52 @@ Microsoft, and ask: _"what fired in the last hour?"_
 - **[docs/CLIENTS.md](./docs/CLIENTS.md)**: Claude Desktop, VS Code, Cursor and other MCP clients.
 - **[AGENTS.md](./AGENTS.md)**: architecture, security rules and conventions for contributors, human or AI.
 
+## Try it without an Azure tenant
+
+[Dev Proxy](https://learn.microsoft.com/microsoft-cloud/dev/dev-proxy/overview) can play Azure for you.
+It answers `login.microsoftonline.com`, `management.azure.com` and `api.loganalytics.io` with the
+hand-written payloads in [`mocks/devproxy/`](./mocks/devproxy). Every ID in them is fake. The device-code
+login completes on its own, so you don't need a browser either.
+
+**Docker only** (Windows, macOS, Linux):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.mock.yml up -d --build --wait
+claude mcp add --transport http azure-safe-mock http://127.0.0.1:8765/mcp
+```
+
+Then in Claude: _"log in to prod, then show me the fired alerts and what happened on vm-web-01"_.
+To stop it, run `docker compose -f docker-compose.yml -f docker-compose.mock.yml down -v`.
+
+To try failure handling (random 5xx, 429 with `Retry-After`, and up to 1.5 s of latency on ARM and Log Analytics),
+start the stack with the chaos preset:
+
+```powershell
+$env:DEVPROXY_CONFIG = "devproxyrc.chaos.json"   # bash: export DEVPROXY_CONFIG=devproxyrc.chaos.json
+docker compose -f docker-compose.yml -f docker-compose.mock.yml up -d --build --wait
+```
+
+**Without Docker** (Windows, PowerShell). Install Dev Proxy, then open a new terminal:
+
+```powershell
+winget install DevProxy.DevProxy --silent
+devproxy --config-file mocks/devproxy/devproxyrc.json   # the first time, accept to trust its certificate
+```
+
+In a second terminal, run the server through it:
+
+```powershell
+$env:HTTPS_PROXY = "http://127.0.0.1:8000"
+$env:NODE_OPTIONS = "--use-system-ca"           # Node trusts the Dev Proxy root in the Windows store
+$env:CONTEXTS_FILE = "mocks/contexts.mock.yaml"
+npm ci; npm run dev
+```
+
+The proxy and the extra CA only exist in the mock setup. `docker-compose.yml` alone never uses a proxy
+or trusts an extra CA. The mocks are hand-written. **Never commit recorded traffic** (for example from Dev
+Proxy's `MockGeneratorPlugin`): it contains real tenant, subscription and resource IDs (AGENTS.md R7).
+CI runs the same stack in the `e2e-mock` job (`npm run test:e2e-mock`).
+
 ## How it protects you
 
 ```
@@ -72,6 +118,7 @@ Requires Node ≥ 24.
 npm ci
 npm run dev        # watch mode
 npm run check      # lint + format + typecheck + test + build (same as CI)
+npm run test:e2e-mock   # against the running mock stack (see "Try it without an Azure tenant")
 ```
 
 The code follows **Feature-Driven Development** (vertical slices under `src/features/`).

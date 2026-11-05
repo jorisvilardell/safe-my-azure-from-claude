@@ -1,0 +1,108 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/dev-proxy/main/schemas/v3.3.1/mockresponseplugin.mocksfile.schema.json",
+  "mocks": [
+    {
+      "request": {
+        "url": "https://api.loganalytics.io/v1/*/query*",
+        "method": "POST",
+        "bodyFragment": "withsource=TableName"
+      },
+      "response": {
+        "body": {
+          "tables": [
+            {
+              "name": "PrimaryResult",
+              "columns": [
+                { "name": "TableName", "type": "string" },
+                { "name": "RowCount", "type": "long" }
+              ],
+              "rows": [
+                ["AppRequests", 52310],
+                ["Heartbeat", 1440],
+                ["AzureActivity", 211],
+                ["SigninLogs", 12]
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://api.loganalytics.io/v1/*/query*",
+        "method": "POST"
+      },
+      "response": {
+        "body": {
+          "tables": [
+            {
+              "name": "PrimaryResult",
+              "columns": [
+                { "name": "TimeGenerated", "type": "datetime" },
+                { "name": "_ResourceId", "type": "string" },
+                { "name": "TenantId", "type": "string" },
+                { "name": "CorrelationId", "type": "string" },
+                { "name": "UserPrincipalName", "type": "string" },
+                { "name": "CallerIpAddress", "type": "string" },
+                { "name": "Message", "type": "string" }
+              ],
+              "rows": [
+                [
+                  "2026-11-03T08:04:11.000Z",
+                  "/SUBSCRIPTIONS/00000000-0000-0000-0000-000000000001/RESOURCEGROUPS/RG-APP/PROVIDERS/MICROSOFT.COMPUTE/VIRTUALMACHINES/VM-WEB-01",
+                  "00000000-0000-0000-0000-0000000000f1",
+                  "00000000-0000-0000-0000-0000000000d1",
+                  "alice.ops@contoso.example",
+                  "203.0.113.42",
+                  "Downloading diagnostics from https://stfakelogs.blob.core.windows.net/insights-logs/vm.json?sv=2022-11-02&ss=b&srt=o&sp=r&se=2026-12-31T00:00:00Z&sig=FAKEsasSig0123456789abcdefFAKE%3D"
+                ],
+                [
+                  "2026-11-03T08:04:12.000Z",
+                  "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+                  "00000000-0000-0000-0000-0000000000f1",
+                  "00000000-0000-0000-0000-0000000000d1",
+                  "alice.ops@contoso.example",
+                  "198.51.100.7",
+                  "app config: DefaultEndpointsProtocol=https;AccountName=stfakelogs;AccountKey=RkFLRS1zdG9yYWdlLWtleS1ub3QtcmVhbA==;EndpointSuffix=core.windows.net"
+                ],
+                [
+                  "2026-11-03T08:04:13.000Z",
+                  "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+                  "00000000-0000-0000-0000-0000000000f1",
+                  "00000000-0000-0000-0000-0000000000d1",
+                  "alice.ops@contoso.example",
+                  "10.0.1.4",
+                  "token request failed: grant_type=client_credentials&client_secret=Fake~ClientSecret.0123456789&scope=default"
+                ]
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://api.loganalytics.io/*",
+        "method": "POST"
+      },
+      "response": {
+        "statusCode": 404,
+        "body": {
+          "error": { "code": "NoMock", "message": "No Dev Proxy mock for this Log Analytics request." }
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://api.loganalytics.io/*",
+        "method": "GET"
+      },
+      "response": {
+        "statusCode": 404,
+        "body": {
+          "error": { "code": "NoMock", "message": "No Dev Proxy mock for this Log Analytics request." }
+        }
+      }
+    }
+  ]
+}

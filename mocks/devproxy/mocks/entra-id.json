@@ -1,0 +1,152 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/dev-proxy/main/schemas/v3.3.1/mockresponseplugin.mocksfile.schema.json",
+  "mocks": [
+    {
+      "request": {
+        "url": "https://login.microsoftonline.com/common/discovery/instance*",
+        "method": "GET"
+      },
+      "response": {
+        "body": {
+          "tenant_discovery_endpoint": "https://login.microsoftonline.com/00000000-0000-0000-0000-0000000000aa/v2.0/.well-known/openid-configuration",
+          "api-version": "1.1",
+          "metadata": [
+            {
+              "preferred_network": "login.microsoftonline.com",
+              "preferred_cache": "login.windows.net",
+              "aliases": [
+                "login.microsoftonline.com",
+                "login.windows.net",
+                "login.microsoft.com",
+                "sts.windows.net"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://login.microsoftonline.com/*/v2.0/.well-known/openid-configuration*",
+        "method": "GET"
+      },
+      "response": {
+        "body": {
+          "token_endpoint": "https://login.microsoftonline.com/00000000-0000-0000-0000-0000000000aa/oauth2/v2.0/token*",
+          "token_endpoint_auth_methods_supported": [
+            "client_secret_post",
+            "private_key_jwt",
+            "client_secret_basic"
+          ],
+          "jwks_uri": "https://login.microsoftonline.com/00000000-0000-0000-0000-0000000000aa/discovery/v2.0/keys",
+          "response_modes_supported": ["query", "fragment", "form_post"],
+          "subject_types_supported": ["pairwise"],
+          "id_token_signing_alg_values_supported": ["RS256"],
+          "response_types_supported": ["code", "id_token", "code id_token", "id_token token"],
+          "scopes_supported": ["openid", "profile", "email", "offline_access"],
+          "issuer": "https://login.microsoftonline.com/00000000-0000-0000-0000-0000000000aa/v2.0",
+          "request_uri_parameter_supported": false,
+          "userinfo_endpoint": "https://graph.microsoft.com/oidc/userinfo",
+          "authorization_endpoint": "https://login.microsoftonline.com/00000000-0000-0000-0000-0000000000aa/oauth2/v2.0/authorize",
+          "device_authorization_endpoint": "https://login.microsoftonline.com/00000000-0000-0000-0000-0000000000aa/oauth2/v2.0/devicecode*",
+          "http_logout_supported": true,
+          "frontchannel_logout_supported": true,
+          "end_session_endpoint": "https://login.microsoftonline.com/00000000-0000-0000-0000-0000000000aa/oauth2/v2.0/logout",
+          "claims_supported": [
+            "sub",
+            "iss",
+            "aud",
+            "exp",
+            "iat",
+            "nonce",
+            "name",
+            "preferred_username",
+            "oid",
+            "tid",
+            "ver"
+          ],
+          "tenant_region_scope": "EU",
+          "cloud_instance_name": "microsoftonline.com",
+          "cloud_graph_host_name": "graph.windows.net",
+          "msgraph_host": "graph.microsoft.com",
+          "rbac_url": "https://pas.windows.net"
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://login.microsoftonline.com/*/oauth2/v2.0/devicecode*",
+        "method": "POST"
+      },
+      "response": {
+        "body": {
+          "user_code": "FAKEUC7Q2",
+          "device_code": "FAKE-device-code-not-a-real-secret",
+          "verification_uri": "https://microsoft.com/devicelogin",
+          "expires_in": 900,
+          "interval": 1,
+          "message": "To sign in, use a web browser to open the page https://microsoft.com/devicelogin and enter the code FAKEUC7Q2 to authenticate."
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://login.microsoftonline.com/*/oauth2/v2.0/token*",
+        "method": "POST",
+        "bodyFragment": "device_code=",
+        "nth": 1
+      },
+      "response": {
+        "statusCode": 400,
+        "body": {
+          "error": "authorization_pending",
+          "error_description": "AADSTS70016: OAuth 2.0 device flow error. Authorization is pending. Continue polling.",
+          "error_codes": [70016],
+          "timestamp": "2026-11-03 08:00:00Z",
+          "trace_id": "00000000-0000-0000-0000-0000000000d3",
+          "correlation_id": "00000000-0000-0000-0000-0000000000d1"
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://login.microsoftonline.com/*/oauth2/v2.0/token*",
+        "method": "POST"
+      },
+      "response": {
+        "body": {
+          "token_type": "Bearer",
+          "expires_in": 3599,
+          "ext_expires_in": 3599,
+          "access_token": "eyJhbGciOiJub25lIn0.eyJzdWIiOiJmYWtlLXVzZXIifQ.ZmFrZS1zaWduYXR1cmU",
+          "refresh_token": "FAKE-refresh-token-not-a-real-secret",
+          "id_token": "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJuYW1lIjoiQWxpY2UgT3BzIiwib2lkIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMGMxIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiYWxpY2Uub3BzQGNvbnRvc28uZXhhbXBsZSIsInN1YiI6ImZha2Utc3ViamVjdCIsInRpZCI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDBhYSIsImV4cCI6NDEwMjQ0NDgwMH0.ZmFrZS1pZC10b2tlbi1zaWduYXR1cmU",
+          "client_info": "eyJ1aWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwYzEiLCJ1dGlkIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMGFhIn0"
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://login.microsoftonline.com/*",
+        "method": "GET"
+      },
+      "response": {
+        "statusCode": 404,
+        "body": { "error": "not_found", "error_description": "No Dev Proxy mock for this Entra ID request." }
+      }
+    },
+    {
+      "request": {
+        "url": "https://login.microsoftonline.com/*",
+        "method": "POST"
+      },
+      "response": {
+        "statusCode": 400,
+        "body": {
+          "error": "invalid_request",
+          "error_description": "No Dev Proxy mock for this Entra ID request."
+        }
+      }
+    }
+  ]
+}

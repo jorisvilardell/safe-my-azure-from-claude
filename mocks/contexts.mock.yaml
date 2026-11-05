@@ -1,0 +1,13 @@
+# Contexts for the mocked Azure (docker-compose.mock.yml + Dev Proxy). Every ID is FAKE (AGENTS.md R7)
+# and matches the payloads in mocks/devproxy/mocks/. Do not put real IDs here.
+contexts:
+  prod:
+    tenantId: 00000000-0000-0000-0000-0000000000aa
+    subscriptions:
+      prod-app: 00000000-0000-0000-0000-000000000001
+      prod-network: 00000000-0000-0000-0000-000000000002
+
+defaultContext: prod
+
+safeTagKeys:
+  - env

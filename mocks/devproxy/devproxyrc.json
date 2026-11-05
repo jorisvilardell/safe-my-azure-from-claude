@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/dev-proxy/main/schemas/v3.3.1/rc.schema.json",
+  "plugins": [
+    {
+      "name": "MockResponsePlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "entraIdMocks"
+    },
+    {
+      "name": "MockResponsePlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "resourceGraphMocks"
+    },
+    {
+      "name": "MockResponsePlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "armMocks"
+    },
+    {
+      "name": "MockResponsePlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "logAnalyticsMocks"
+    }
+  ],
+  "urlsToWatch": [
+    "https://login.microsoftonline.com/*",
+    "https://management.azure.com/*",
+    "https://api.loganalytics.io/*"
+  ],
+  "entraIdMocks": { "mocksFile": "mocks/entra-id.json" },
+  "resourceGraphMocks": { "mocksFile": "mocks/resource-graph.json" },
+  "armMocks": { "mocksFile": "mocks/arm.json" },
+  "logAnalyticsMocks": { "mocksFile": "mocks/log-analytics.json" },
+  "asSystemProxy": false,
+  "logLevel": "information",
+  "newVersionNotification": "none",
+  "showSkipMessages": false,
+  "showTimestamps": true,
+  "validateSchemas": false
+}

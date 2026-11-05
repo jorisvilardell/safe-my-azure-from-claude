@@ -1,0 +1,82 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/dev-proxy/main/schemas/v3.3.1/genericrandomerrorplugin.errorsfile.schema.json",
+  "errors": [
+    {
+      "request": { "url": "https://management.azure.com/*" },
+      "responses": [
+        {
+          "statusCode": 500,
+          "headers": [
+            { "name": "content-type", "value": "application/json" },
+            { "name": "x-ms-correlation-request-id", "value": "00000000-0000-0000-0000-0000000000d1" }
+          ],
+          "body": {
+            "error": {
+              "code": "InternalServerError",
+              "message": "Encountered internal server error for /subscriptions/00000000-0000-0000-0000-000000000001. Correlation ID: 00000000-0000-0000-0000-0000000000d1. Caller: alice.ops@contoso.example"
+            }
+          }
+        },
+        {
+          "statusCode": 503,
+          "headers": [
+            { "name": "content-type", "value": "application/json" },
+            { "name": "Retry-After", "value": "@dynamic" }
+          ],
+          "body": {
+            "error": {
+              "code": "ServiceUnavailable",
+              "message": "The service is unavailable for subscription 00000000-0000-0000-0000-000000000001. Retry later."
+            }
+          }
+        },
+        {
+          "statusCode": 429,
+          "headers": [
+            { "name": "content-type", "value": "application/json" },
+            { "name": "Retry-After", "value": "@dynamic" }
+          ],
+          "body": {
+            "error": {
+              "code": "TooManyRequests",
+              "message": "Too many requests for tenant 00000000-0000-0000-0000-0000000000aa. Retry after the Retry-After interval."
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": { "url": "https://api.loganalytics.io/*" },
+      "responses": [
+        {
+          "statusCode": 502,
+          "headers": [{ "name": "content-type", "value": "application/json" }],
+          "body": {
+            "error": {
+              "code": "BadGateway",
+              "message": "Upstream failure for workspace 00000000-0000-0000-0000-0000000000f1."
+            }
+          }
+        },
+        {
+          "statusCode": 504,
+          "headers": [{ "name": "content-type", "value": "application/json" }],
+          "body": {
+            "error": {
+              "code": "GatewayTimeout",
+              "message": "The query against workspace 00000000-0000-0000-0000-0000000000f1 timed out."
+            }
+          }
+        },
+        {
+          "statusCode": 429,
+          "headers": [
+            { "name": "content-type", "value": "application/json" },
+            { "name": "Retry-After", "value": "@dynamic" }
+          ],
+          "body": { "error": { "code": "ThrottledError", "message": "Too many queries. Retry later." } }
+        }
+      ]
+    }
+  ]
+}

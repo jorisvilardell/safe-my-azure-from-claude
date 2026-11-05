@@ -56,6 +56,29 @@ describe('createCredentialManager', () => {
     expect(stub.created).toEqual([FAKE_CONTEXTS.prod?.tenantId, FAKE_CONTEXTS.lab?.tenantId]);
   });
 
+  it('logs in and serves tokens from the CAE cache the Azure SDK pipelines use', async () => {
+    const seen: { call: string; enableCae: unknown }[] = [];
+    const manager = createCredentialManager({
+      contexts: FAKE_CONTEXTS,
+      logger: createLogger('error', { write: () => undefined }),
+      factory: () => ({
+        authenticate: (_scopes, options) => {
+          seen.push({ call: 'authenticate', enableCae: options?.enableCae });
+          return Promise.resolve();
+        },
+        getToken: (_scopes, options) => {
+          seen.push({ call: 'getToken', enableCae: options?.enableCae });
+          return Promise.resolve({ token: FAKE_ACCESS_TOKEN, expiresOnTimestamp: Date.now() + 3_600_000 });
+        },
+      }),
+    });
+    manager.startLogin('prod');
+    await flushLogin();
+    await manager.getCredential('prod').getToken(ARM_SCOPE, { enableCae: false });
+    expect(seen.map((s) => s.call)).toEqual(['authenticate', 'getToken', 'getToken']);
+    expect(seen.every((s) => s.enableCae === true)).toBe(true);
+  });
+
   it('captures the device code for the login page only, then logs in on approval', async () => {
     const { stub, manager, logs } = setup();
     expect(manager.startLogin('prod')).toBe('started');
