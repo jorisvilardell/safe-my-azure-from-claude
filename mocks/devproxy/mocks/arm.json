@@ -1,0 +1,310 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/dev-proxy/main/schemas/v3.3.1/mockresponseplugin.mocksfile.schema.json",
+  "mocks": [
+    {
+      "request": {
+        "url": "https://management.azure.com/subscriptions/*/providers/Microsoft.Insights/eventtypes/management/values*",
+        "method": "GET"
+      },
+      "response": {
+        "body": {
+          "value": [
+            {
+              "authorization": {
+                "action": "Microsoft.Compute/virtualMachines/restart/action",
+                "scope": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01"
+              },
+              "caller": "alice.ops@contoso.example",
+              "channels": "Operation",
+              "claims": {
+                "aud": "https://management.core.windows.net/",
+                "iss": "https://sts.windows.net/00000000-0000-0000-0000-0000000000aa/",
+                "appid": "00000000-0000-0000-0000-0000000000c2",
+                "ipaddr": "203.0.113.42",
+                "name": "Alice Ops",
+                "http://schemas.microsoft.com/identity/claims/objectidentifier": "00000000-0000-0000-0000-0000000000c1",
+                "http://schemas.microsoft.com/identity/claims/tenantid": "00000000-0000-0000-0000-0000000000aa",
+                "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn": "alice.ops@contoso.example",
+                "id_token_hint": "eyJhbGciOiJub25lIn0.eyJvaWQiOiJmYWtlLW9pZCJ9.ZmFrZS1pZC10b2tlbg"
+              },
+              "correlationId": "00000000-0000-0000-0000-0000000000d1",
+              "description": "",
+              "eventDataId": "00000000-0000-0000-0000-0000000000e2",
+              "eventName": { "value": "EndRequest", "localizedValue": "End request" },
+              "category": { "value": "Administrative", "localizedValue": "Administrative" },
+              "eventTimestamp": "2026-11-03T08:05:31.000Z",
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01/events/00000000-0000-0000-0000-0000000000e2/ticks/639000000000000000",
+              "level": "Informational",
+              "operationId": "00000000-0000-0000-0000-0000000000d2",
+              "operationName": {
+                "value": "Microsoft.Compute/virtualMachines/restart/action",
+                "localizedValue": "Restart Virtual Machine"
+              },
+              "resourceGroupName": "rg-app",
+              "resourceProviderName": { "value": "Microsoft.Compute", "localizedValue": "Microsoft.Compute" },
+              "resourceType": {
+                "value": "Microsoft.Compute/virtualMachines",
+                "localizedValue": "Virtual machine"
+              },
+              "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+              "status": { "value": "Succeeded", "localizedValue": "Succeeded" },
+              "subStatus": { "value": "OK", "localizedValue": "OK (HTTP Status Code: 200)" },
+              "submissionTimestamp": "2026-11-03T08:06:02.000Z",
+              "subscriptionId": "00000000-0000-0000-0000-000000000001",
+              "tenantId": "00000000-0000-0000-0000-0000000000aa",
+              "httpRequest": {
+                "clientRequestId": "11111111-2222-3333-4444-555555555555",
+                "clientIpAddress": "203.0.113.42",
+                "method": "POST"
+              },
+              "properties": {
+                "statusCode": "OK",
+                "serviceRequestId": "00000000-0000-0000-0000-0000000000d2",
+                "entity": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+                "message": "Microsoft.Compute/virtualMachines/restart/action",
+                "hierarchy": "00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-000000000001"
+              }
+            },
+            {
+              "caller": "bob.owner@fabrikam.example",
+              "correlationId": "00000000-0000-0000-0000-0000000000d4",
+              "eventDataId": "00000000-0000-0000-0000-0000000000e4",
+              "eventTimestamp": "2026-11-03T07:58:10.000Z",
+              "level": "Error",
+              "operationName": {
+                "value": "Microsoft.Network/networkSecurityGroups/securityRules/write",
+                "localizedValue": "Create or Update Security Rule"
+              },
+              "resourceGroupName": "rg-net",
+              "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-net/providers/Microsoft.Network/networkSecurityGroups/nsg-hub/securityRules/allow-198.51.100.7",
+              "status": { "value": "Failed", "localizedValue": "Failed" },
+              "subStatus": { "value": "Forbidden", "localizedValue": "Forbidden (HTTP Status Code: 403)" },
+              "subscriptionId": "00000000-0000-0000-0000-000000000002",
+              "tenantId": "00000000-0000-0000-0000-0000000000aa"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/*/providers/Microsoft.Insights/metricDefinitions*",
+        "method": "GET"
+      },
+      "response": {
+        "body": {
+          "value": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01/providers/microsoft.insights/metricdefinitions/Percentage CPU",
+              "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+              "namespace": "Microsoft.Compute/virtualMachines",
+              "name": { "value": "Percentage CPU", "localizedValue": "Percentage CPU" },
+              "displayDescription": "The percentage of allocated compute units that are currently in use by the Virtual Machine(s)",
+              "category": "Capacity",
+              "isDimensionRequired": false,
+              "unit": "Percent",
+              "primaryAggregationType": "Average",
+              "supportedAggregationTypes": ["None", "Average", "Minimum", "Maximum", "Total", "Count"],
+              "metricAvailabilities": [
+                { "timeGrain": "PT1M", "retention": "P93D" },
+                { "timeGrain": "PT5M", "retention": "P93D" },
+                { "timeGrain": "PT1H", "retention": "P93D" }
+              ]
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01/providers/microsoft.insights/metricdefinitions/Inbound Flows",
+              "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+              "namespace": "Microsoft.Compute/virtualMachines",
+              "name": { "value": "Inbound Flows", "localizedValue": "Inbound Flows" },
+              "displayDescription": "Inbound flows by remote IP",
+              "category": "Network",
+              "isDimensionRequired": false,
+              "unit": "Count",
+              "primaryAggregationType": "Total",
+              "supportedAggregationTypes": ["Total", "Count", "Maximum"],
+              "metricAvailabilities": [{ "timeGrain": "PT1M", "retention": "P93D" }],
+              "dimensions": [{ "value": "RemoteIP", "localizedValue": "RemoteIP" }]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/*/providers/Microsoft.Insights/metrics?*",
+        "method": "GET"
+      },
+      "response": {
+        "body": {
+          "cost": 59,
+          "timespan": "2026-11-03T08:00:00Z/2026-11-03T09:00:00Z",
+          "interval": "PT1M",
+          "namespace": "Microsoft.Compute/virtualMachines",
+          "resourceregion": "westeurope",
+          "value": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01/providers/Microsoft.Insights/metrics/Inbound Flows",
+              "type": "Microsoft.Insights/metrics",
+              "name": { "value": "Inbound Flows", "localizedValue": "Inbound Flows" },
+              "displayDescription": "Inbound flows by remote IP",
+              "unit": "Count",
+              "errorCode": "Success",
+              "timeseries": [
+                {
+                  "metadatavalues": [
+                    { "name": { "value": "RemoteIP", "localizedValue": "RemoteIP" }, "value": "203.0.113.42" }
+                  ],
+                  "data": [
+                    { "timeStamp": "2026-11-03T08:00:00Z", "total": 120 },
+                    { "timeStamp": "2026-11-03T08:01:00Z", "total": 98 }
+                  ]
+                },
+                {
+                  "metadatavalues": [
+                    { "name": { "value": "RemoteIP", "localizedValue": "RemoteIP" }, "value": "198.51.100.7" }
+                  ],
+                  "data": [{ "timeStamp": "2026-11-03T08:00:00Z", "total": 7 }]
+                },
+                {
+                  "metadatavalues": [
+                    { "name": { "value": "RemoteIP", "localizedValue": "RemoteIP" }, "value": "10.0.1.4" }
+                  ],
+                  "data": [{ "timeStamp": "2026-11-03T08:00:00Z", "total": 3 }]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/*/providers/Microsoft.ResourceHealth/availabilityStatuses/current*",
+        "method": "GET"
+      },
+      "response": {
+        "body": {
+          "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01/providers/Microsoft.ResourceHealth/availabilityStatuses/current",
+          "name": "current",
+          "type": "Microsoft.ResourceHealth/AvailabilityStatuses",
+          "location": "westeurope",
+          "properties": {
+            "availabilityState": "Degraded",
+            "title": "Degraded",
+            "summary": "We're sorry, your virtual machine isn't available because of an unexpected restart triggered by alice.ops@contoso.example.",
+            "reasonType": "Customer Initiated",
+            "reasonChronicity": "Transient",
+            "detailedStatus": "",
+            "occuredTime": "2026-11-03T08:05:00.000Z",
+            "reportedTime": "2026-11-03T08:06:00.000Z",
+            "recommendedActions": [
+              {
+                "action": "Check the boot diagnostics of the virtual machine.",
+                "actionUrl": "https://portal.azure.com/#resource/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01/bootDiagnostics",
+                "actionUrlText": "boot diagnostics"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/*/providers/Microsoft.ResourceHealth/availabilityStatuses?*",
+        "method": "GET"
+      },
+      "response": {
+        "body": {
+          "value": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01/providers/Microsoft.ResourceHealth/availabilityStatuses/639000000000000000",
+              "name": "639000000000000000",
+              "type": "Microsoft.ResourceHealth/AvailabilityStatuses",
+              "location": "westeurope",
+              "properties": {
+                "availabilityState": "Degraded",
+                "summary": "Your virtual machine restarted unexpectedly.",
+                "occuredTime": "2026-11-03T08:05:00.000Z",
+                "reportedTime": "2026-11-03T08:06:00.000Z"
+              }
+            },
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01/providers/Microsoft.ResourceHealth/availabilityStatuses/638999000000000000",
+              "name": "638999000000000000",
+              "type": "Microsoft.ResourceHealth/AvailabilityStatuses",
+              "location": "westeurope",
+              "properties": {
+                "availabilityState": "Available",
+                "summary": "There aren't any known Azure platform problems affecting this virtual machine.",
+                "occuredTime": "2026-11-02T08:00:00.000Z",
+                "reportedTime": "2026-11-02T08:00:30.000Z"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/subscriptions/*/providers/Microsoft.ResourceHealth/events?*",
+        "method": "GET"
+      },
+      "response": {
+        "body": {
+          "value": [
+            {
+              "id": "/providers/Microsoft.ResourceHealth/events/FAKE-TRK1",
+              "name": "FAKE-TRK1",
+              "type": "/providers/Microsoft.ResourceHealth/events",
+              "properties": {
+                "eventType": "ServiceIssue",
+                "eventSource": "ServiceHealth",
+                "status": "Active",
+                "title": "Virtual Machines - West Europe - Mitigated (tracking FAKE-TRK1)",
+                "summary": "Starting at 08:00 UTC a subset of customers using Virtual Machines in West Europe may see restarts. Tracking ID FAKE-TRK1.",
+                "level": "Warning",
+                "eventLevel": "Warning",
+                "impactStartTime": "2026-11-03T08:00:00.000Z",
+                "lastUpdateTime": "2099-01-01T00:00:00.000Z",
+                "impact": [
+                  {
+                    "impactedService": "Virtual Machines",
+                    "impactedRegions": [
+                      {
+                        "impactedRegion": "West Europe",
+                        "status": "Active",
+                        "impactedSubscriptions": ["00000000-0000-0000-0000-000000000001"],
+                        "impactedTenants": ["00000000-0000-0000-0000-0000000000aa"],
+                        "lastUpdateTime": "2026-11-03T09:00:00.000Z"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/*",
+        "method": "GET"
+      },
+      "response": {
+        "statusCode": 404,
+        "body": { "error": { "code": "NoMock", "message": "No Dev Proxy mock for this ARM request." } }
+      }
+    },
+    {
+      "request": {
+        "url": "https://management.azure.com/*",
+        "method": "POST"
+      },
+      "response": {
+        "statusCode": 404,
+        "body": { "error": { "code": "NoMock", "message": "No Dev Proxy mock for this ARM request." } }
+      }
+    }
+  ]
+}

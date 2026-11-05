@@ -1,0 +1,85 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/dev-proxy/main/schemas/v3.3.1/rc.schema.json",
+  "plugins": [
+    {
+      "name": "RetryAfterPlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "urlsToWatch": ["https://management.azure.com/*", "https://api.loganalytics.io/*"]
+    },
+    {
+      "name": "LatencyPlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "latency",
+      "urlsToWatch": ["https://management.azure.com/*", "https://api.loganalytics.io/*"]
+    },
+    {
+      "name": "RateLimitingPlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "rateLimiting",
+      "urlsToWatch": ["https://management.azure.com/*", "https://api.loganalytics.io/*"]
+    },
+    {
+      "name": "GenericRandomErrorPlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "randomErrors",
+      "urlsToWatch": ["https://management.azure.com/*", "https://api.loganalytics.io/*"]
+    },
+    {
+      "name": "MockResponsePlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "entraIdMocks"
+    },
+    {
+      "name": "MockResponsePlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "resourceGraphMocks"
+    },
+    {
+      "name": "MockResponsePlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "armMocks"
+    },
+    {
+      "name": "MockResponsePlugin",
+      "enabled": true,
+      "pluginPath": "~appFolder/plugins/DevProxy.Plugins.dll",
+      "configSection": "logAnalyticsMocks"
+    }
+  ],
+  "urlsToWatch": [
+    "https://login.microsoftonline.com/*",
+    "https://management.azure.com/*",
+    "https://api.loganalytics.io/*"
+  ],
+  "latency": { "minMs": 100, "maxMs": 1500 },
+  "rateLimiting": {
+    "rateLimit": 40,
+    "costPerRequest": 2,
+    "resetTimeWindowSeconds": 5,
+    "warningThresholdPercent": 80,
+    "headerLimit": "RateLimit-Limit",
+    "headerRemaining": "RateLimit-Remaining",
+    "headerReset": "RateLimit-Reset",
+    "headerRetryAfter": "Retry-After",
+    "resetFormat": "SecondsLeft",
+    "whenLimitExceeded": "Throttle"
+  },
+  "randomErrors": { "errorsFile": "chaos/errors.json", "rate": 25, "retryAfterInSeconds": 2 },
+  "entraIdMocks": { "mocksFile": "mocks/entra-id.json" },
+  "resourceGraphMocks": { "mocksFile": "mocks/resource-graph.json" },
+  "armMocks": { "mocksFile": "mocks/arm.json" },
+  "logAnalyticsMocks": { "mocksFile": "mocks/log-analytics.json" },
+  "asSystemProxy": false,
+  "logLevel": "information",
+  "newVersionNotification": "none",
+  "showSkipMessages": false,
+  "showTimestamps": true,
+  "validateSchemas": false
+}

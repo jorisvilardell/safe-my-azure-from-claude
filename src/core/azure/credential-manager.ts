@@ -10,6 +10,13 @@ export const ARM_SCOPE = 'https://management.azure.com/.default';
 /** Entra ID device codes expire after 15 minutes; `DeviceCodeInfo` does not carry the expiry. */
 const DEVICE_CODE_TTL_MS = 15 * 60_000;
 
+/**
+ * `@azure/identity` keeps one in-memory MSAL cache for CAE requests and another for non-CAE ones.
+ * The Azure SDK pipelines always ask with `enableCae: true`, so the login must fill that cache and
+ * every token request must use it: otherwise the first SDK call finds no account and fails.
+ */
+const CAE = { enableCae: true } as const;
+
 /** What the credential factory must return. `DeviceCodeCredential` satisfies it. */
 export interface LoginCredential extends TokenCredential {
   /** Runs the interactive (device-code) flow. */
@@ -157,7 +164,7 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
       wrapped: {
         getToken: async (scopes, options) => {
           try {
-            const token = await entry.credential.getToken(scopes, options);
+            const token = await entry.credential.getToken(scopes, { ...options, ...CAE });
             recordToken(entry, token);
             return token;
           } catch (err) {
@@ -179,8 +186,11 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
 
   const runLogin = async (alias: string, entry: Entry): Promise<void> => {
     try {
-      await entry.credential.authenticate(ARM_SCOPE, { abortSignal: entry.abort.signal });
-      recordToken(entry, await entry.credential.getToken(ARM_SCOPE, { abortSignal: entry.abort.signal }));
+      await entry.credential.authenticate(ARM_SCOPE, { abortSignal: entry.abort.signal, ...CAE });
+      recordToken(
+        entry,
+        await entry.credential.getToken(ARM_SCOPE, { abortSignal: entry.abort.signal, ...CAE }),
+      );
       if (!isCurrent(alias, entry)) return;
       entry.loggedIn = true;
       entry.pending = undefined;

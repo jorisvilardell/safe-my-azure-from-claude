@@ -1,0 +1,53 @@
+# Mocked Azure for demos and CI, no tenant needed:
+#   docker compose -f docker-compose.yml -f docker-compose.mock.yml up -d --build
+# Chaos preset (random 5xx, 429 + Retry-After, latency):
+#   DEVPROXY_CONFIG=devproxyrc.chaos.json docker compose -f docker-compose.yml -f docker-compose.mock.yml up -d
+#
+# Dev Proxy answers login.microsoftonline.com, management.azure.com and api.loganalytics.io with the
+# hand-written, fake-ID payloads in mocks/devproxy/. The proxy and the extra CA are set HERE only:
+# the default docker-compose.yml never uses a proxy or trusts an extra CA.
+services:
+  azure-safe-mcp:
+    depends_on:
+      devproxy:
+        condition: service_healthy
+    volumes:
+      # Replaces the real contexts.yaml mount (same target path).
+      - ./mocks/contexts.mock.yaml:/app/config/contexts.yaml:ro
+      - devproxy-ca:/certs:ro
+    environment:
+      HTTPS_PROXY: http://devproxy:8000
+      NO_PROXY: 127.0.0.1,localhost
+      NODE_EXTRA_CA_CERTS: /certs/devproxy-ca.pem
+    # Same check as the image (Dockerfile HEALTHCHECK), polled faster so `up --wait` returns quickly.
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8765/healthz || exit 1']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  devproxy:
+    image: ghcr.io/dotnet/dev-proxy:3.3.1
+    container_name: azure-safe-devproxy
+    entrypoint: ['/bin/bash', '/config/entrypoint.sh']
+    environment:
+      DEVPROXY_CONFIG: ${DEVPROXY_CONFIG:-devproxyrc.json}
+    volumes:
+      - ./mocks/devproxy:/config:ro
+      # Dev Proxy's root CA (mock only). The entrypoint also writes devproxy-ca.pem here.
+      - devproxy-ca:/home/devproxy/.config/dev-proxy/rootCert
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'bash',
+          '-c',
+          'test -s /home/devproxy/.config/dev-proxy/rootCert/devproxy-ca.pem && exec 3<>/dev/tcp/127.0.0.1/8000',
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+
+volumes:
+  devproxy-ca:
