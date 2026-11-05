@@ -19,11 +19,12 @@ import { sampleArgs } from '../helpers/schema-sample.js';
  * (`POST /admin/login`, polled with `GET /admin/login/:context`), and calls the tools with the MCP key.
  */
 
-const MCP_URL = new URL(process.env.E2E_MCP_URL ?? 'http://127.0.0.1:8765/mcp');
+// Not 8765 / azure-safe-mcp: those belong to a real install (docker-compose.mock.yml).
+const MCP_URL = new URL(process.env.E2E_MCP_URL ?? 'http://127.0.0.1:18765/mcp');
 const KEYS_FILE = '/run/safe-azure/keys.json';
 const CHAOS = process.env.E2E_MOCK_MODE === 'chaos';
 const PROXY_CONTAINER = process.env.E2E_DEVPROXY_CONTAINER ?? 'azure-safe-devproxy';
-const SERVER_CONTAINER = process.env.E2E_SERVER_CONTAINER ?? 'azure-safe-mcp';
+const SERVER_CONTAINER = process.env.E2E_SERVER_CONTAINER ?? 'azure-safe-mcp-mock';
 /** Set to 0 to skip the `docker logs` assertions (e.g. when the containers run elsewhere). */
 const READ_DOCKER_LOGS = process.env.E2E_DOCKER_LOGS !== '0';
 /** Longer than the server's own Log Analytics backstop (75 s): a hang shows up as a timeout here. */
@@ -70,7 +71,33 @@ function docker(args: readonly string[]): string {
   return res.stdout;
 }
 
+/**
+ * This suite reads the server keys, starts a sign-in and logs out: pointed at a real install it
+ * would print a real user code on failure and drop the real session. So it refuses any container
+ * that docker-compose.mock.yml did not label as the mock server.
+ */
+function assertMockStack(): void {
+  const names = docker([
+    'ps',
+    '--filter',
+    'label=safe-azure.mock=true',
+    '--filter',
+    `name=^${SERVER_CONTAINER}$`,
+    '--format',
+    '{{.Names}}',
+  ])
+    .split('\n')
+    .map((n) => n.trim());
+  if (!names.includes(SERVER_CONTAINER)) {
+    throw new Error(
+      `Refusing to run: ${SERVER_CONTAINER} is not the mock server (label safe-azure.mock=true). ` +
+        'Start docker-compose.yml + docker-compose.mock.yml.',
+    );
+  }
+}
+
 function readKeys(): Keys {
+  assertMockStack();
   const parsed = JSON.parse(docker(['exec', SERVER_CONTAINER, 'cat', KEYS_FILE])) as Partial<Keys>;
   if (typeof parsed.mcp !== 'string' || typeof parsed.admin !== 'string') {
     throw new Error(`${KEYS_FILE} does not hold {mcp, admin}`);

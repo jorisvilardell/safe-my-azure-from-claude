@@ -85,14 +85,28 @@ handler(args, ctx) ──▶ scrub(result) ──▶ JSON text to the AI
 
 `scrub()` (`core/anonymizer/scrub.ts`) deep-walks the result, keys included. In order:
 
-1. **Secrets are removed whole**: PEM blocks (also unterminated private keys), JWTs, SAS tokens and
-   `SharedAccessSignature=`, `Bearer …`, `key=value` secrets (`AccountKey`, `SharedAccessKey`,
-   `sig`, `password`, `client_secret`, `access_token`, `code`, …), secret JSON fields inside text,
-   and credential headers (`Authorization`, `Cookie`, `x-ms-token-*`, `x-ms-client-principal*`…).
+0. **Percent-escapes are decoded** (up to three levels), so nothing hides behind `%2F`, `%40` or
+   `%3D`: `%2Fsubscriptions%2F<guid>` is an ARM ID, `jane%40contoso.com` an email. The AI gets
+   the decoded text. An escape that would decode to a control or invisible character is kept.
+1. **Secrets are removed whole**: PEM blocks (also unterminated private keys), JWTs (signed or
+   not), well-known token formats on their own (GitHub, GitLab, npm, Slack, AWS key IDs, Google,
+   Stripe, OpenAI/Anthropic, Entra ID client secrets `…8Q~…`, Azure DevOps PATs, and any padded
+   base64 blob of 40+ characters such as storage, Cosmos DB, Service Bus and Function keys), SAS
+   tokens and `SharedAccessSignature=`, `Bearer …` and `Basic …`, the password of a
+   `scheme://user:password@host` URL, credential headers (`Authorization`, `Cookie`,
+   `x-ms-token-*`, `x-ms-client-principal*`…), and any value whose **name ends** like a secret, in
+   every common syntax: `name=value`, `name: value`, `name = value`, `"name": "…"`,
+   `'name': '…'` (`DB_PASSWORD`, `AZURE_CLIENT_SECRET`, `GITHUB_TOKEN`, `ConnectionString`,
+   `x-functions-key`, `Ocp-Apim-Subscription-Key`, `api-key`, `AccountKey`, …), plus `sig=`,
+   `code=` and `subscription-key=` in query strings. Names are matched with explicit boundaries,
+   never `\b`, so `_` and escapes cannot hide them.
 2. **ARM IDs** become `rg/type/name`, or `sub:<alias>/…` when they are subscription-scoped.
-3. **GUIDs** become `id-NNN` (or `app-NNN` under `appId`, `clientId`, …). Known tenant and
-   subscription IDs become their alias (`tenant-<context>`, `<subscription alias>`).
-4. **Emails and UPNs** become `user-NNN`.
+3. **GUIDs** become `id-NNN` (or `app-NNN` under `appId`, `clientId`, …), wherever they are:
+   glued to `_`, letters or digits (`vm_<guid>`, `<guid>_backup`), and also written as 32 hex
+   digits without dashes. Known tenant and subscription IDs become their alias
+   (`tenant-<context>`, `<subscription alias>`); a generated pseudonym never reuses an alias.
+4. **Emails and UPNs** become `user-NNN`, including Entra ID guest UPNs
+   (`jane_contoso.com#EXT#@tenant.onmicrosoft.com`) and non-ASCII local parts.
 5. **Public IPs** (v4 and v6) become `public-ip-<name>` when they belong to one of your Public IP
    resources, or `public-ip-external-NNN` otherwise. Private, CGNAT, loopback, link-local,
    multicast and reserved ranges, and the Azure platform IP `168.63.129.16`, are kept.
@@ -107,7 +121,11 @@ Field names drive extra rules (`core/anonymizer/fields.ts`):
   GUID). `displayName` and `name` are treated as a person only inside an identity object
   (`identity`, `principal`, `claims`, …, or next to `principalId`/`appId`), so resource names
   survive;
-- `*Version` fields are not scanned for IPv4, so `1.10.2.0` stays a version.
+- known Azure version fields (`agentVersion`, `osVersion`, `typeHandlerVersion`,
+  `kubernetesVersion`, … an exact list, not a `*Version` suffix) are not scanned for IPv4, so
+  `1.10.2.0` stays a version. KQL results are scrubbed in **strict** mode, without that exception
+  and without the `version 1.2.3.4` one: the AI names the columns and the keys of dynamic values,
+  so `bag_pack('xversion', ClientIP)` must not unmask an IP.
 
 Pseudonyms are stable for the life of the process: the same email is always `user-003`, so the
 AI can correlate events without knowing who it is. The reverse map lives only in server memory.
@@ -270,7 +288,7 @@ Why this design:
   `.set`, …), `set` and other non-query statements, cross-scope and external functions
   (`cluster()`, `database()`, `workspace()`, `app()`, `resource()`, `adx()`, `arg()`,
   `externaldata`, `external_table()`), `evaluate` plugins outside a small allowlist (no
-  `http_request`, `sql_request`, `python`, `r`, …), and `fork`/`facet` are rejected. The query is
+  `http_request`, `sql_request`, `python`, `r`, …), `fork`/`facet` are rejected. The query is
   capped at 10 000 characters, the timespan at 7 days (passed to the API, so it bounds the data
   whatever the query says) and the result at 500 rows, 1024 characters per cell and 64 KB.
 
@@ -338,19 +356,23 @@ on stderr that tells the agent what to do instead. It prints nothing on stdout. 
 
 | Tool                                                               | Blocked                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Bash`, `PowerShell`, any tool with a `command`                    | `safe-azure login\|keys\|install\|uninstall\|update\|down`; **every** `az` command (it can mint tokens and prints raw IDs); `azd auth`; Azure PowerShell cmdlets (`Get-AzAccessToken`, `Connect-AzAccount`, …); `docker`/`podman` `exec\|cp\|inspect\|logs\|attach\|export\|commit\|diff\|top\|debug` on **any** container, and any other `docker` command naming `azure-safe-mcp` except `ps`/`stats`/`images` |
+| `PowerShell`                                                       | **Every call.** PowerShell reaches .NET, the registry, DPAPI and every Azure module directly: no word list can guard it, so the tool is refused as a whole, and so is starting `powershell`/`pwsh` from any other shell                                                                                                                                                                                         |
+| `Bash`, any tool with a `command`                                  | `safe-azure login\|keys\|install\|uninstall\|update\|down`; **every** `az` command (it can mint tokens and prints raw IDs); `azd auth`; Azure PowerShell cmdlets (`Get-AzAccessToken`, `Connect-AzAccount`, …); `docker`/`podman` `exec\|cp\|inspect\|logs\|attach\|export\|commit\|diff\|top\|debug` on **any** container, and any other `docker` command naming `azure-safe-mcp` except `ps`/`stats`/`images` |
 |                                                                    | Any command with port `8765` and a loopback host (`localhost`, `127.*`, `::1`, `0.0.0.0`, `2130706433`, `/dev/tcp/…`) or an HTTP client or interpreter (`curl`, `wget`, `iwr`, `irm`, `Invoke-WebRequest`, `Invoke-RestMethod`, `nc`, `node`, `python`, `fetch`, `WebClient`, …)                                                                                                                                |
-|                                                                    | Any mention of `.azure`, `.IdentityService`, MSAL cache files, `keys.bin`, the safe-azure config dir (`%APPDATA%\safe-azure`, `~/.config/safe-azure`), `contexts.yaml`, `.claude/settings*`, `disableAllHooks`; `powershell -EncodedCommand`; base64-decode-then-run pipelines                                                                                                                                  |
+|                                                                    | Any mention of `.azure`, `.IdentityService`, MSAL cache files, `keys.bin`, the safe-azure config dir (`%APPDATA%\safe-azure`, `~/.config/safe-azure`), `contexts.yaml`, `.claude/settings*`, `disableAllHooks`; base64-decode-then-run pipelines                                                                                                                                                                |
 | `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `LS`         | Paths under `.azure`, the config dir, `keys.bin`, `contexts.yaml`. Write tools also: `.claude/settings*.json` and `~/.claude/skills/safe-azure/`                                                                                                                                                                                                                                                                |
 | `Glob`, `Grep`                                                     | The same paths in `path`, `pattern` (Glob) or `glob`. A `Grep` whose scope contains `~/.azure` or the config dir (the home directory, `C:/Users`, `/`)                                                                                                                                                                                                                                                          |
 | `WebFetch`                                                         | Loopback URLs on port 8765                                                                                                                                                                                                                                                                                                                                                                                      |
+| Any of the above, against the guard itself                         | Deleting, moving or overwriting the `safe-azure` binary (or its updater), `cargo install --path/--git/safe-azure`, `cargo uninstall safe-azure`: without its binary the hook cannot start, and Claude Code then lets every call through                                                                                                                                                                         |
+| Paths written to dodge the checks                                  | A wildcard that can match a protected name (`~/.az*/msal_t*`, `safe-a*`, `config/*.yaml`, `~/.config/*`), a Windows 8.3 short name that can stand for one (`AZURE~1`, `CONTEX~1.YAM`, `SAFE-A~1`), drive-relative paths (`\Users\me\…`, resolved against the home drive)                                                                                                                                        |
+| `docker`/`podman`/`nerdctl` options                                | Sharing another container's namespaces (`--pid/--network/--ipc=container:…`, `--volumes-from`), the host's (`--pid=host`, …), `--privileged`, `--cap-add SYS_PTRACE/SYS_ADMIN/ALL`, mounting the Docker socket or the host root (`-v /:/…`), `kill -s/--signal`, `checkpoint`; Unicode dashes count as `-`                                                                                                      |
 | Malformed event, or a known tool without its expected string field | Everything (fail closed). Unknown tools without a `command` pass.                                                                                                                                                                                                                                                                                                                                               |
 
 `docker exec` and friends are blocked for every container, not only `azure-safe-mcp`: the target
 can be a container ID, a name prefix, a compose service name or `$(docker ps -q)`, so matching on
 the name would be easy to evade. Matching is coarse on purpose: it lowercases the command, drops
 quotes, `^` and escapes, splits on `;`, `&&`, `||`, `|`, newlines, `$(…)` and backticks, and looks
-for the words anywhere in a segment. So `bash -c '…'`, `cmd /c …`, `powershell -c …`, full paths
+for the words anywhere in a segment. So `bash -c '…'`, `cmd /c …`, full paths
 (`C:\…\az.cmd`) and `"a"z`-style quoting are caught. The price is false positives: a commit
 message that says `az login` or a `grep` for `127.0.0.1:8765` is blocked too, and the agent has to
 rephrase.
@@ -362,7 +384,9 @@ Known limits. The hook raises the bar; it is not a sandbox:
   wrote and then runs, `Invoke-Expression` on a computed string, other encodings than base64).
 - **Other programs:** any binary the agent writes or downloads, other CLIs that hold Azure tokens
   (Terraform, VS Code, the Azure SDKs reading `~/.azure` from inside a script it wrote), symlinks
-  to protected paths, and a Bash `grep -r` over the home directory.
+  to protected paths, and a Bash `grep -r` over the home directory. As defence in depth, the
+  server runs with `node --disable-sigusr1`, so a process that can signal it cannot open the
+  Node inspector and read the in-memory tokens.
 - **Same-user access:** the agent runs as you. Anything you can read, a process it starts can read
   with enough effort. DPAPI protects `keys.bin` from plain reads, and `safe-azure login` refuses to
   run without a TTY, as defence in depth.
@@ -392,6 +416,11 @@ Stated plainly, so you can decide what to point this server at.
    SAS, `Bearer`), by `key=value` name, and by field name. A bare key or password in a log message
    (`the key is 3x4mpl3…`), a third-party token format it does not know, or an identifier that is
    not a GUID, email or IP will pass. Do not send secrets to your logs.
+   In `run_kql`, the AI writes the query, and the query API can only read: the server trusts it
+   to write sensible KQL (log searches, probes, advanced metrics) and does not police its
+   functions. A query that rewrites a value (`replace_string()`, `base64_encode_tostring()`,
+   `parse_ipv4()`, `substring()`) can turn an identifier into a shape the scrubber no longer
+   recognises. Results are scrubbed in strict mode and the audit log records every query.
 4. **Prompt injection through Azure data.** Anyone who can write a resource name, a tag, an alert
    description or a log line can write instructions for the AI. The tools are read-only and hold no
    token, so the damage is limited, but injected text could steer the investigation, trigger broad

@@ -11,18 +11,24 @@ import {
 import { maskPublicIPv4, maskPublicIPv6, type PublicIpIndex } from './ip.js';
 import {
   ARM_ID,
+  BASIC,
   BEARER,
   EMAIL,
   GUID,
+  GUID_NO_DASHES,
   GUID_ONLY,
   HEADER_SECRET,
   JSON_SECRET_FIELD,
   JWT,
   KEY_VALUE_SECRET,
+  KNOWN_TOKEN,
   PEM,
   PEM_UNTERMINATED,
+  PERCENT_RUN,
+  QUERY_SECRET,
   SAS_CONNECTION_STRING,
   SAS_TOKEN,
+  URL_USERINFO,
 } from './patterns.js';
 import type { PseudonymKind, Pseudonymizer } from './pseudonymizer.js';
 import { MASKED, maskTags, normalizeTagKeys } from './tags.js';
@@ -38,11 +44,18 @@ export interface ScrubOptions {
   readonly safeTagKeys?: Iterable<string>;
   /** Maps our own public IPs to their Public IP resource name (`public-ip-<name>`). */
   readonly publicIpIndex?: PublicIpIndex;
+  /**
+   * For data whose keys and wording the AI controls (KQL results): no field-name exception
+   * lowers the masking. Today that is the `*Version` exception for IPv4, which
+   * `bag_pack('xversion', ClientIP)` or `strcat('version ', ip)` would otherwise exploit.
+   */
+  readonly strict?: boolean;
 }
 
 interface Resolved {
   readonly safeTagKeys: ReadonlySet<string>;
   readonly publicIpIndex: PublicIpIndex | undefined;
+  readonly strict: boolean;
 }
 
 interface TextMode {
@@ -58,8 +71,42 @@ function resolve(options: ScrubOptions): Resolved {
   return {
     safeTagKeys: normalizeTagKeys(options.safeTagKeys),
     publicIpIndex: options.publicIpIndex,
+    strict: options.strict === true,
   };
 }
+
+/** Control and invisible characters must not come back through a decoded escape. */
+// eslint-disable-next-line no-control-regex -- control characters are exactly what we refuse.
+const UNSAFE_DECODED = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/;
+
+function decodeRun(run: string): string {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(run);
+  } catch {
+    // Not UTF-8: decode byte by byte, which is enough to expose ASCII identifiers.
+    decoded = run.replace(/%([0-9a-f]{2})/gi, (_m, h: string) => String.fromCharCode(Number.parseInt(h, 16)));
+  }
+  return UNSAFE_DECODED.test(decoded) ? run : decoded;
+}
+
+/**
+ * Percent-decodes `%XX` runs (up to 3 levels, for double-encoded URLs) so encoded IDs, emails,
+ * IPs and secrets (`%2Fsubscriptions%2F<guid>`, `jane%40contoso.com`) are seen by the patterns.
+ * The decoded text is what the AI gets: URLs stay readable, and nothing hides behind an escape.
+ */
+function percentDecode(input: string): string {
+  let out = input;
+  for (let i = 0; i < 3 && out.includes('%'); i++) {
+    const next = out.replace(PERCENT_RUN, decodeRun);
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+const quoted = (value: string): string =>
+  value.startsWith('"') ? `"${REDACTED}"` : value.startsWith("'") ? `'${REDACTED}'` : REDACTED;
 
 /**
  * `/subscriptions/<sub>/resourceGroups/<rg>/providers/<ns>/<type>/<name>[/<childType>/<child>]`
@@ -87,8 +134,10 @@ export function shortenArmId(armId: string, p: Pseudonymizer): string {
 
 /**
  * Order matters:
- * 1. Secrets first (PEM, JWT, SAS, Bearer, key=value, JSON fields, headers): they are removed
- *    whole, before any later pass could rewrite part of them and break the match.
+ * 0. Percent-escapes are decoded, so nothing hides behind `%2F`, `%40` or `%3D`.
+ * 1. Secrets first (PEM, JWT, known token formats, SAS, Bearer/Basic, URL passwords, headers,
+ *    key=value, JSON fields): they are removed whole, before any later pass could rewrite part
+ *    of them and break the match.
  * 2. ARM IDs before bare GUIDs: an ARM ID contains the subscription GUID and must be shortened
  *    to names as a unit.
  * 3. GUIDs, then emails.
@@ -96,21 +145,29 @@ export function shortenArmId(armId: string, p: Pseudonymizer): string {
  *    look like an IP; IPv6 runs before IPv4 so `::ffff:203.0.113.5` is replaced whole.
  */
 function scrubText(input: string, p: Pseudonymizer, r: Resolved, mode: TextMode): string {
-  const s = input
+  const s = percentDecode(input)
     .replace(PEM, REDACTED)
     .replace(PEM_UNTERMINATED, REDACTED)
     .replace(JWT, REDACTED)
+    .replace(KNOWN_TOKEN, REDACTED)
     .replace(SAS_CONNECTION_STRING, `SharedAccessSignature=${REDACTED}`)
     .replace(SAS_TOKEN, `SharedAccessSignature ${REDACTED}`)
     .replace(BEARER, `Bearer ${REDACTED}`)
-    .replace(KEY_VALUE_SECRET, (_m, key: string) => `${key}=${REDACTED}`)
-    .replace(JSON_SECRET_FIELD, (_m, prefix: string) => `${prefix}"${REDACTED}"`)
+    .replace(BASIC, `Basic ${REDACTED}`)
+    .replace(URL_USERINFO, (_m, scheme: string, user: string) => `${scheme}${user}:${REDACTED}@`)
     .replace(HEADER_SECRET, (_m, name: string, sep: string) => `${name}${sep}${REDACTED}`)
+    .replace(
+      KEY_VALUE_SECRET,
+      (_m, key: string, sep: string, value: string) => `${key}${sep}${quoted(value)}`,
+    )
+    .replace(QUERY_SECRET, (_m, key: string) => `${key}=${REDACTED}`)
+    .replace(JSON_SECRET_FIELD, (_m, prefix: string) => `${prefix}"${REDACTED}"`)
     .replace(ARM_ID, (id) => shortenArmId(id, p))
     .replace(GUID, (g) => p.pseudonym(mode.guidKind, g))
+    .replace(GUID_NO_DASHES, (g) => p.pseudonym(mode.guidKind, g))
     .replace(EMAIL, (e) => p.pseudonym('user', e));
   const v6 = maskPublicIPv6(s, p, r.publicIpIndex);
-  return mode.maskIPv4 ? maskPublicIPv4(v6, p, r.publicIpIndex) : v6;
+  return mode.maskIPv4 || r.strict ? maskPublicIPv4(v6, p, r.publicIpIndex, r.strict) : v6;
 }
 
 export function scrubString(input: string, p: Pseudonymizer, options: ScrubOptions = {}): string {

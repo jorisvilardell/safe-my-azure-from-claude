@@ -10,9 +10,10 @@
  */
 
 /**
- * Invisible characters: zero-width (U+200B–U+200F), word joiner (U+2060), BOM (U+FEFF), bidi
- * embeddings/overrides (U+202A–U+202E) and isolates (U+2066–U+2069), Unicode tag characters
- * (U+E0000–U+E007F, "ASCII smuggling"), and C0/C1 control characters except `\t` and `\n`.
+ * Invisible characters: zero-width (U+200B–U+200F), word joiner and invisible operators
+ * (U+2060–U+2064), BOM (U+FEFF), soft hyphen, fillers, bidi embeddings/overrides (U+202A–U+202E)
+ * and isolates (U+2066–U+2069), Unicode tag characters (U+E0000–U+E007F, "ASCII smuggling"),
+ * variation selectors (U+FE00–U+FE0F, U+E0100–U+E01EF), and C0/C1 controls except `\t`, `\n`.
  * `\r`, `\v`, `\f` and NEL are line breaks: they are turned into `\n` first.
  */
 const INVISIBLE_RANGES: readonly (readonly [number, number])[] = [
@@ -20,12 +21,28 @@ const INVISIBLE_RANGES: readonly (readonly [number, number])[] = [
   [0x0e, 0x1f],
   [0x7f, 0x84],
   [0x86, 0x9f],
+  // Soft hyphen, combining grapheme joiner, Arabic letter mark: invisible, they split a word
+  // (`jane<U+00AD>.doe@…`) so a pattern no longer matches it.
+  [0xad, 0xad],
+  [0x34f, 0x34f],
+  [0x61c, 0x61c],
+  [0x115f, 0x1160],
+  [0x17b4, 0x17b5],
+  [0x180b, 0x180f],
   [0x200b, 0x200f],
   [0x202a, 0x202e],
-  [0x2060, 0x2060],
+  // Word joiner and the invisible math operators (function application, times, separator, plus).
+  [0x2060, 0x2064],
   [0x2066, 0x2069],
+  [0x3164, 0x3164],
+  // Variation selectors: besides emoji styling, they carry hidden bytes ("emoji smuggling").
+  [0xfe00, 0xfe0f],
   [0xfeff, 0xfeff],
+  [0xffa0, 0xffa0],
+  [0xfff9, 0xfffb],
+  [0x1d173, 0x1d17a],
   [0xe0000, 0xe007f],
+  [0xe0100, 0xe01ef],
 ];
 const LINE_BREAK_CHARS = [0x0b, 0x0c, 0x0d, 0x85, 0x2028, 0x2029];
 

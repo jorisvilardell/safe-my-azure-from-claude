@@ -96,6 +96,15 @@ async function main(): Promise<void> {
   process.on('SIGTERM', shutdown);
 }
 
+// Node's default handlers print the error and its message, which for an Azure SDK error holds
+// request URLs, tenant and subscription IDs (R5). Print a fixed line instead, then exit.
+const crash = (): void => {
+  process.stderr.write('Fatal: unexpected error (details withheld).\n');
+  process.exit(1);
+};
+process.on('uncaughtException', crash);
+process.on('unhandledRejection', crash);
+
 main().catch(() => {
   process.stderr.write('Fatal: failed to start (details withheld).\n');
   process.exit(1);

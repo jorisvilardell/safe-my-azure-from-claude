@@ -2,7 +2,13 @@ import { ResourceTemplate, type McpServer } from '@modelcontextprotocol/sdk/serv
 import type { ReadResourceResult } from '@modelcontextprotocol/sdk/types.js';
 import type { InventorySnapshot } from '../core/azure/index.js';
 import { AppError, sanitizeError } from '../core/errors/index.js';
-import type { ToolContext } from '../core/mcp/index.js';
+import { UNTRUSTED_META, type ToolContext } from '../core/mcp/index.js';
+import {
+  findInjections,
+  injectionWarnings,
+  stripInvisibleDeep,
+  untrustedText,
+} from '../core/safety/index.js';
 
 /**
  * Optional MCP resource `azure://inventory/<context>` (#33), OFF by default (`INVENTORY_RESOURCE=on`).
@@ -24,7 +30,8 @@ export interface InventoryDocument {
   readonly note: string;
 }
 
-const cap = (s: string): string => (s.length > MAX_TEXT_LENGTH ? `${s.slice(0, MAX_TEXT_LENGTH)}…` : s);
+/** Capped at a word boundary BEFORE scrubbing, so no GUID or email is cut into a fragment (R10). */
+const cap = (s: string): string => untrustedText(s, { max: MAX_TEXT_LENGTH }) ?? '';
 
 /** Allowlist: only the ref parts and the location leave the snapshot. */
 export function toInventoryDocument(snapshot: InventorySnapshot): InventoryDocument {
@@ -93,18 +100,43 @@ export function registerInventoryResource(server: McpServer, ctx: ToolContext): 
       const alias = typeof raw === 'string' ? raw : (raw?.[0] ?? '');
       // The URI is AI input: echo it back scrubbed, like everything else.
       const safeUri = ctx.anonymizer.scrubString(uri.href);
+      const started = performance.now();
       let body: unknown;
+      let error: string | undefined;
       try {
         body = await readInventory(ctx, alias);
       } catch (err) {
         const safe = sanitizeError(err);
         ctx.logger.warn('resource read failed', { resource: 'inventory', code: safe.code });
+        error = safe.code;
         body = { error: safe };
       }
+      // Same pipeline as executeTool (R8b): invisible characters out BEFORE scrubbing, then
+      // injection warnings, then one audit line.
+      const scrubbed = ctx.anonymizer.scrub(stripInvisibleDeep(body));
+      const found = findInjections(scrubbed);
+      const warnings = injectionWarnings(found);
+      const text = JSON.stringify(
+        warnings.length === 0 ? scrubbed : { warnings, ...(scrubbed as object) },
+        null,
+        2,
+      );
+      try {
+        ctx.audit.record({
+          tool: 'resource:inventory',
+          args: { uri: safeUri },
+          durationMs: Math.round(performance.now() - started),
+          ok: error === undefined,
+          ...(error === undefined ? {} : { error }),
+          resultBytes: Buffer.byteLength(text, 'utf8'),
+          injectionWarnings: found.length,
+        });
+      } catch {
+        ctx.logger.warn('audit failed', { resource: 'inventory' });
+      }
       return {
-        contents: [
-          { uri: safeUri, mimeType: MIME_TYPE, text: JSON.stringify(ctx.anonymizer.scrub(body), null, 2) },
-        ],
+        contents: [{ uri: safeUri, mimeType: MIME_TYPE, text }],
+        _meta: { ...UNTRUSTED_META },
       };
     },
   );

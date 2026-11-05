@@ -25,4 +25,6 @@ RUN mkdir -p /run/safe-azure && chown node:node /run/safe-azure && chmod 700 /ru
 USER node
 EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:8765/healthz || exit 1
-CMD ["node", "dist/main.js"]
+# --disable-sigusr1: SIGUSR1 would open the Node inspector, from which anyone who can signal the
+# process (docker exec, a container sharing its PID namespace) could read the in-memory tokens.
+CMD ["node", "--disable-sigusr1", "dist/main.js"]

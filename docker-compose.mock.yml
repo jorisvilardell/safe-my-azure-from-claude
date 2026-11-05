@@ -8,6 +8,13 @@
 # the default docker-compose.yml never uses a proxy or trusts an extra CA.
 services:
   azure-safe-mcp:
+    # Its own name, port and label, so the e2e-mock suite (which reads the keys and signs in
+    # through /admin) can never reach a real install running next to it.
+    container_name: azure-safe-mcp-mock
+    ports: !override
+      - '127.0.0.1:18765:8765'
+    labels:
+      safe-azure.mock: 'true'
     depends_on:
       devproxy:
         condition: service_healthy

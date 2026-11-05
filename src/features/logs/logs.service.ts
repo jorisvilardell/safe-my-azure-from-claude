@@ -243,8 +243,9 @@ const fieldScrubber =
   (anonymizer: Anonymizer): FieldScrubber =>
   (key, value) =>
     // Scrubbed as `{ [column]: value }` so field-name rules apply; scrub() also rewrites the key, so
-    // read the single value back positionally.
-    Object.values(anonymizer.scrub({ [key]: value }) as Record<string, unknown>)[0];
+    // read the single value back positionally. Strict: the AI names the columns and dynamic keys,
+    // so no field-name exception may lower the masking (`bag_pack('xversion', ClientIP)`).
+    Object.values(anonymizer.scrub({ [key]: value }, { strict: true }) as Record<string, unknown>)[0];
 
 export async function runKql(
   azure: AzureAccess,

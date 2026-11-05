@@ -340,7 +340,8 @@ describe('prompt injection in tool results (#39)', () => {
 
   it('audits every call, with the injection-warning count', () => {
     const lines = auditLines.map((l) => JSON.parse(l) as { tool: string; injectionWarnings: number });
-    expect(new Set(lines.map((l) => l.tool))).toEqual(new Set(TOOL_NAMES));
+    // Every tool, plus the inventory resource, which goes through the same audit (R8b).
+    expect(new Set(lines.map((l) => l.tool))).toEqual(new Set([...TOOL_NAMES, 'resource:inventory']));
     expect(lines.some((l) => l.injectionWarnings > 0)).toBe(true);
   });
 });

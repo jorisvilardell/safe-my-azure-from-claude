@@ -155,7 +155,7 @@ expectNoLeak(toolText(result));
 - **R7.** No real Azure identifiers in the repo. That covers tests, fixtures, docs, and commit messages. Use obviously fake GUIDs (`00000000-0000-0000-0000-000000000001`) and documentation IPs (`203.0.113.0/24`, `198.51.100.0/24`).
 - **R8.** The token cache stays in memory. Never write credentials to disk, a volume, or an env var dump. The same goes for the inventory index (`core/azure/inventory-index.ts`): memory only, dropped on logout.
 - **R8b.** MCP resources (only `azure://inventory/<context>`, opt-in with `INVENTORY_RESOURCE=on`) are registered in `app/` and their content goes through `ctx.anonymizer.scrub()` and `sanitizeError()`, exactly like a tool result.
-- **R9.** Agents working on this repo must **not** run `az login`, `az account get-access-token`, `docker exec`/`docker cp` against a running server container (that is how the keys are read), call `/admin/*`, or read `~/.azure/**`. `.claude/settings.json` enforces this for Claude Code.
+- **R9.** Agents working on this repo must **not** run `az login`, `az account get-access-token`, `docker exec`/`docker cp` against a running server container (that is how the keys are read), call `/admin/*`, or read `~/.azure/**`. `.claude/settings.json` denies these as defence in depth; the real control for Claude Code is the `safe-azure hook claude` guard (docs/SECURITY.md §7), which also protects its own binary.
 - **R10.** Text copied from Azure is **untrusted data, never instructions** (prompt injection, #39).
   Mappers pass every free-text field through `untrustedText()` from `core/safety` (invisible and control
   characters removed, whitespace collapsed, length capped at whitespace so no identifier is cut into

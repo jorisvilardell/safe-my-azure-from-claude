@@ -30,10 +30,13 @@ export function parseToolText(result: CallToolResult): unknown {
 
 /** Patterns that must NEVER appear in anything sent to the AI (AGENTS.md G1/G2). */
 export const LEAK_PATTERNS: readonly (readonly [string, RegExp])[] = [
-  ['GUID', /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
-  ['ARM id', /\/subscriptions\//i],
+  // No `\b`: a GUID glued to `_`, a letter or a `%2F` escape is still a leak.
+  ['GUID', /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i],
+  ['GUID (encoded)', /%2[fF][0-9a-f]{8}-/i],
+  ['ARM id', /\/subscriptions\/|%2[fF]subscriptions%2[fF]/i],
   ['JWT', /\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}/],
-  ['email', /\b[\w.%+-]+@[\w-]+(?:\.[\w-]+)+\b/],
+  // Guest UPNs (`#EXT#@`) and encoded `@` (`%40`) included.
+  ['email', /[\w.%+#-]+(?:@|%40)[\w-]+(?:\.[\w-]+)+/],
   ['bearer', /Bearer\s+(?!\[REDACTED\])\S+/i],
   // Public IPv4: excludes 10/8, 127/8, 0/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, 224/4, 240/4,
   // the Azure platform IP 168.63.129.16, dotted versions (`v1.2.3.4`, `agentVersion: "1.10.2.0"`).

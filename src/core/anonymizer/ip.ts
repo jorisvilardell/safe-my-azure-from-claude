@@ -1,5 +1,5 @@
 import { isIPv6 } from 'node:net';
-import { IPV4_CANDIDATE, IPV6_CANDIDATE } from './patterns.js';
+import { IPV4_CANDIDATE, IPV4_CANDIDATE_STRICT, IPV6_CANDIDATE } from './patterns.js';
 import type { Pseudonymizer } from './pseudonymizer.js';
 
 /**
@@ -109,8 +109,14 @@ export function maskPublicIPv6(input: string, p: Pseudonymizer, index?: PublicIp
   });
 }
 
-export function maskPublicIPv4(input: string, p: Pseudonymizer, index?: PublicIpIndex): string {
-  return input.replace(IPV4_CANDIDATE, (m) => {
+/** `strict`: no `version 1.2.3.4` exception (text whose wording the AI controls). */
+export function maskPublicIPv4(
+  input: string,
+  p: Pseudonymizer,
+  index?: PublicIpIndex,
+  strict = false,
+): string {
+  return input.replace(strict ? IPV4_CANDIDATE_STRICT : IPV4_CANDIDATE, (m) => {
     const v4 = parseIPv4(m);
     if (v4 === undefined) return m;
     // Normalised so `203.0.113.005` and `203.0.113.5` share one placeholder.

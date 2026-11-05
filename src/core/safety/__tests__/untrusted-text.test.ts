@@ -39,6 +39,17 @@ describe('stripInvisible / neutralizeText', () => {
     expect(stripInvisible(`a${cp(0x2060)}b${cp(0x200e)}c`)).toBe('abc');
   });
 
+  it('removes soft hyphens, invisible operators and variation selectors (emoji smuggling)', () => {
+    for (const c of [0xad, 0x34f, 0x2061, 0x2064, 0x180e, 0x3164, 0xfe00, 0xfe0f, 0xe0100, 0xe01ef]) {
+      expect(stripInvisible(`jane${cp(c)}.doe`), c.toString(16)).toBe('jane.doe');
+    }
+  });
+
+  it('lets the scrubber see an email split by a soft hyphen', () => {
+    const a = createAnonymizer();
+    expect(a.scrubString(stripInvisible(`jane.doe@con${cp(0xad)}toso.example`))).toBe('user-001');
+  });
+
   it('keeps tabs and line breaks (CR, VT, FF, NEL become LF)', () => {
     expect(stripInvisible(`a\tb\r\nc\rd${cp(0x85)}e`)).toBe('a\tb\nc\nd\ne');
   });
