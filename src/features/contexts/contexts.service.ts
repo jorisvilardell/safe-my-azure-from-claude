@@ -1,10 +1,8 @@
 import type { AzureAccess, ContextInfo, LoginController, LoginStatus } from '../../core/azure/index.js';
 
 export interface ContextsDeps {
-  /** Login lifecycle only: this interface exposes no user code and no token. */
+  /** Status and logout only: it cannot start a sign-in, and exposes no user code and no token. */
   readonly logins: LoginController;
-  /** Absolute URL of the /login page, built from config (never from request headers). */
-  readonly loginUrl: string;
 }
 
 export interface ContextsList {
@@ -37,21 +35,25 @@ export function useContext(azure: AzureAccess, deps: ContextsDeps, alias: string
     loggedIn,
     message: loggedIn
       ? `Context '${alias}' is now active.`
-      : `Context '${alias}' is now active but not logged in. Run the login tool.`,
+      : `Context '${alias}' is now active but not logged in. Ask the user to run \`safe-azure login ${alias}\` in their own terminal.`,
   };
 }
 
 /**
- * Starts the device-code flow. The user code is shown ONLY on the /login page:
- * this result is a fixed message that never carries the code (AGENTS.md G1, R1).
+ * A hint only: it does NOT start a device-code flow (ADR 0001 §2). Only the admin API, called by
+ * the human's `safe-azure login` in a TTY, starts one and gets the code. Starting it here would let
+ * an agent open a sign-in the human never asked for, and keep a live code waiting server-side.
  */
 export function login(azure: AzureAccess, deps: ContextsDeps, alias?: string): MessageResult {
   const target = alias ?? azure.contexts.active();
-  if (deps.logins.startLogin(target) === 'already-logged-in') {
-    return { message: `Context '${target}' is already logged in. Run logout first to sign in again.` };
+  if (deps.logins.status(target).loggedIn) {
+    return { message: `Context '${target}' is already logged in.` };
   }
-  return { message: `Open ${deps.loginUrl} to sign in to context '${target}'.` };
+  return { message: loginHint(target) };
 }
+
+export const loginHint = (alias: string): string =>
+  `Ask the user to run \`safe-azure login ${alias}\` in their own terminal. The sign-in code is never shown here.`;
 
 export function loginStatus(azure: AzureAccess, deps: ContextsDeps, alias?: string): LoginStatusResult {
   if (alias !== undefined) deps.logins.status(alias); // throws UnknownContext

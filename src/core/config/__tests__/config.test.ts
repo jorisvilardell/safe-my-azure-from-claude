@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadEnv, loginPageUrl, parseContexts } from '../index.js';
+import { loadEnv, parseContexts } from '../index.js';
 
 const YAML = `
 contexts:
@@ -23,16 +23,10 @@ describe('contexts.yaml defaultContext', () => {
   });
 });
 
-describe('loginPageUrl', () => {
-  it('defaults to loopback and the configured port, not request headers', () => {
-    expect(loginPageUrl(loadEnv({ PORT: '9000' }))).toBe('http://127.0.0.1:9000/login');
-  });
-
-  it('honours PUBLIC_URL', () => {
-    expect(loginPageUrl(loadEnv({ PUBLIC_URL: 'http://localhost:18765/' }))).toBe(
-      'http://localhost:18765/login',
-    );
-    expect(() => loadEnv({ PUBLIC_URL: 'ftp://x' })).toThrow();
+describe('KEYS_FILE', () => {
+  it('defaults to the container tmpfs and can be overridden', () => {
+    expect(loadEnv({}).KEYS_FILE).toBe('/run/safe-azure/keys.json');
+    expect(loadEnv({ KEYS_FILE: '/tmp/k/keys.json' }).KEYS_FILE).toBe('/tmp/k/keys.json');
   });
 });
 

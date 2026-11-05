@@ -18,15 +18,14 @@ import { createAnonymizer } from '../../../core/anonymizer/index.js';
 import { createAzureAccess, createContextStore, createPublicIpIndex } from '../../../core/azure/index.js';
 import { contextIdAliases } from '../../../core/config/index.js';
 import { executeTool, type ToolDefinition } from '../../../core/mcp/index.js';
+import { loginHint } from '../contexts.service.js';
 import { createContextsFeature } from '../index.js';
-
-const LOGIN_URL = 'http://127.0.0.1:8765/login';
 
 function setup(): LoginRig & {
   call: (name: string, args?: Record<string, unknown>) => Promise<CallToolResult>;
 } {
   const rig = createLoginRig();
-  const feature = createContextsFeature({ logins: rig.manager, loginUrl: LOGIN_URL });
+  const feature = createContextsFeature({ logins: rig.manager });
   const outputs: string[] = [];
   const call = async (name: string, args: Record<string, unknown> = {}): Promise<CallToolResult> => {
     const tool: ToolDefinition | undefined = feature.tools.find((t) => t.name === name);
@@ -47,7 +46,7 @@ function setup(): LoginRig & {
 
 describe('contexts feature', () => {
   it('exposes the five context tools', () => {
-    const feature = createContextsFeature({ logins: createLoginRig().manager, loginUrl: LOGIN_URL });
+    const feature = createContextsFeature({ logins: createLoginRig().manager });
     expect(feature.tools.map((t) => t.name)).toEqual([
       'list_contexts',
       'use_context',
@@ -57,9 +56,32 @@ describe('contexts feature', () => {
     ]);
   });
 
-  it('keeps the loopback login URL intact through executeTool (scrubber regression)', async () => {
+  it('login only hints at the CLI: it starts no device-code flow and shows no code', async () => {
+    const { call, stub, manager } = setup();
+    const result = await call('login', { alias: 'lab' });
+    expect(result.isError).toBeUndefined();
+    expect(parseToolText(result)).toEqual({ message: loginHint('lab') });
+    expect(loginHint('lab')).toBe(
+      'Ask the user to run `safe-azure login lab` in their own terminal. The sign-in code is never shown here.',
+    );
+    expect(stub.created).toEqual([]);
+    expect(manager.loginState('lab')).toBe('none');
+    expect(manager.status('lab').loginPending).toBe(false);
+  });
+
+  it('login never carries the code, even while a CLI sign-in is pending', async () => {
+    const { call, manager } = setup();
+    manager.startLogin('prod');
+    // The code really was captured server-side: the assertions in `call` are not vacuous.
+    expect(manager.pendingLogin('prod')?.userCode).toBe(FAKE_USER_CODE);
+    const text = toolText(await call('login'));
+    expect(text).not.toContain(FAKE_USER_CODE);
+    expect(parseToolText(await call('login'))).toEqual({ message: loginHint('prod') });
+  });
+
+  it('keeps the hint intact through a main.ts-like anonymizer (scrubber regression)', async () => {
     const rig = createLoginRig();
-    const feature = createContextsFeature({ logins: rig.manager, loginUrl: LOGIN_URL });
+    const feature = createContextsFeature({ logins: rig.manager });
     const tool = feature.tools.find((t) => t.name === 'login');
     if (tool === undefined) throw new Error('missing tool');
     // Anonymizer wired like main.ts: aliases, and a public IP index over Resource Graph.
@@ -80,9 +102,8 @@ describe('contexts feature', () => {
       anonymizer: createAnonymizer({ aliases: contextIdAliases(FAKE_CONTEXTS), publicIpIndex }),
     });
 
-    const result = await executeTool(tool, {}, ctx);
-    expect(toolText(result)).toContain('http://127.0.0.1:8765/login');
-    expect(parseToolText(result)).toEqual({ message: `Open ${LOGIN_URL} to sign in to context 'prod'.` });
+    const result = await executeTool(tool, {}, { ...ctx, azure: rig.azure });
+    expect(parseToolText(result)).toEqual({ message: loginHint('prod') });
   });
 
   it('lists contexts by alias only', async () => {
@@ -100,7 +121,8 @@ describe('contexts feature', () => {
     expect(parseToolText(await call('use_context', { alias: 'lab' }))).toEqual({
       active: 'lab',
       loggedIn: false,
-      message: "Context 'lab' is now active but not logged in. Run the login tool.",
+      message:
+        "Context 'lab' is now active but not logged in. Ask the user to run `safe-azure login lab` in their own terminal.",
     });
     expect(azure.contexts.active()).toBe('lab');
   });
@@ -108,18 +130,14 @@ describe('contexts feature', () => {
   it('runs a full login / status / logout cycle without leaking the code or token', async () => {
     const { call, stub, azure, logs, manager } = setup();
 
-    const login = await call('login');
-    expect(login.isError).toBeUndefined();
-    expect(parseToolText(login)).toEqual({ message: `Open ${LOGIN_URL} to sign in to context 'prod'.` });
-    // The code really was captured server-side: the assertions above are not vacuous.
-    expect(manager.loginPageState().pending[0]?.userCode).toBe(FAKE_USER_CODE);
+    // The human's `safe-azure login` goes through the admin API, which calls this.
+    manager.startLogin('prod');
+    expect(manager.pendingLogin('prod')?.userCode).toBe(FAKE_USER_CODE);
 
     expect(parseToolText(await call('login_status', { alias: 'prod' }))).toEqual({
       contexts: [{ alias: 'prod', loggedIn: false, loginPending: true, loginFailed: false, active: true }],
     });
-    expect(parseToolText(await call('login', { alias: 'prod' }))).toEqual({
-      message: `Open ${LOGIN_URL} to sign in to context 'prod'.`,
-    });
+    expect(parseToolText(await call('login', { alias: 'prod' }))).toEqual({ message: loginHint('prod') });
 
     stub.approve();
     await flushLogin();
@@ -153,8 +171,8 @@ describe('contexts feature', () => {
   });
 
   it('reports a failed login without the SDK error', async () => {
-    const { call, stub } = setup();
-    await call('login', { alias: 'lab' });
+    const { call, stub, manager } = setup();
+    manager.startLogin('lab');
     stub.fail();
     await flushLogin();
     expect(parseToolText(await call('login_status', { alias: 'lab' }))).toEqual({
@@ -187,7 +205,7 @@ describe('contexts feature', () => {
       credentials: rig.manager,
       clients: rig.azure.clients,
     });
-    const feature = createContextsFeature({ logins: rig.manager, loginUrl: LOGIN_URL });
+    const feature = createContextsFeature({ logins: rig.manager });
     const tool = feature.tools.find((t) => t.name === 'login');
     if (tool === undefined) throw new Error('missing tool');
     const result = await executeTool(tool, {}, { ...rig.ctx, azure });

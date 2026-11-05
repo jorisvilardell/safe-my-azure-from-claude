@@ -3,7 +3,7 @@
 **Read-only, anonymising Azure MCP server.** Let Claude (or any MCP-capable AI agent) help you
 investigate Azure alerts and incidents **without sending credentials or identifiers to the AI**.
 
-- 🔒 **No credentials to the AI.** You sign in with Microsoft device-code login on a local page. The token lives only in the container's memory.
+- 🔒 **No credentials to the AI.** You sign in with Microsoft device-code login from your own terminal (`safe-azure login`). The token lives only in the container's memory.
 - 🕶️ **No identifiers to the AI.** Subscription/tenant GUIDs, ARM IDs, emails, secrets, tag values, and public IPs are anonymised. Only resource **names** are shown.
 - 👀 **Read-only.** There are no write tools and no generic "run any command" tool. Use Azure `Reader` roles.
 - 🏢 **Multi-tenant.** Switch between tenants and subscriptions by **alias** from the chat.
@@ -36,11 +36,12 @@ Requires Docker Desktop (or Docker Engine with Compose v2) and Claude Code.
 ```bash
 cp config/contexts.example.yaml config/contexts.yaml   # your tenants and subscriptions, by alias (gitignored)
 docker compose up -d --build                            # listens on 127.0.0.1:8765 only
-claude mcp add --transport http azure-safe http://127.0.0.1:8765/mcp
+claude mcp add --scope user safe-azure -- safe-azure mcp  # stdio bridge that adds the MCP key
 ```
 
-Then, in Claude: _"log me in to prod"_. Open the `/login` link it gives you, enter the code at
-Microsoft, and ask: _"what fired in the last hour?"_
+Then, in your own terminal, run `safe-azure login prod`, enter the code it prints at Microsoft, and
+ask Claude: _"what fired in the last hour?"_ The `safe-azure` CLI is tracked in
+[#60](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/60)–[#63](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/63).
 
 ## Documentation
 
@@ -60,10 +61,11 @@ login completes on its own, so you don't need a browser either.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.mock.yml up -d --build --wait
-claude mcp add --transport http azure-safe-mock http://127.0.0.1:8765/mcp
+claude mcp add --scope user safe-azure -- safe-azure mcp
+safe-azure login prod   # completes on its own against the mocked Entra ID
 ```
 
-Then in Claude: _"log in to prod, then show me the fired alerts and what happened on vm-web-01"_.
+Then in Claude: _"show me the fired alerts and what happened on vm-web-01"_.
 To stop it, run `docker compose -f docker-compose.yml -f docker-compose.mock.yml down -v`.
 
 To try failure handling (random 5xx, 429 with `Retry-After`, and up to 1.5 s of latency on ARM and Log Analytics),
@@ -98,10 +100,10 @@ CI runs the same stack in the `e2e-mock` job (`npm run test:e2e-mock`).
 ## How it protects you
 
 ```
- Claude Code ──MCP/HTTP (127.0.0.1)──▶ ┌──────────── container ────────────┐
-                                       │ tool → allowlist DTO → scrub()    │──▶ Azure (read-only)
- You (browser) ── /login (device code) ▶│ token cache: in-memory only       │
-                                       └───────────────────────────────────┘
+ Claude Code ─ safe-azure mcp ─ /mcp + Bearer key ─▶ ┌──────── container ─────────────┐
+                                                     │ tool → allowlist DTO → scrub() │──▶ Azure (read-only)
+ You (terminal) ─ safe-azure login ─ /admin + key ──▶ │ token cache: in-memory only    │
+                                                     └────────────────────────────────┘
 ```
 
 - Every tool result goes through `scrub()` (`src/core/anonymizer`). Every error goes through `sanitizeError()`.

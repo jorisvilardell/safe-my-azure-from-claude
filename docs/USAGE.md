@@ -79,11 +79,17 @@ docker compose up -d --build
 This builds the image and starts the `azure-safe-mcp` container. It listens on
 `127.0.0.1:8765` only:
 
-| Path       | For                                                 |
-| ---------- | --------------------------------------------------- |
-| `/mcp`     | MCP over Streamable HTTP (POST, stateless).         |
-| `/login`   | The device-code sign-in page, for you in a browser. |
-| `/healthz` | Liveness check (`{"status":"ok"}`), used by Docker. |
+| Path       | For                                                                                                |
+| ---------- | -------------------------------------------------------------------------------------------------- |
+| `/mcp`     | MCP over Streamable HTTP (POST, stateless). Needs `Authorization: Bearer <mcp key>`.               |
+| `/admin/*` | The `safe-azure` CLI's API (sign-in, logout, switch context). Needs the admin key. Not for the AI. |
+| `/healthz` | Liveness check (`{"status":"ok","version":"…"}`), no key, used by Docker.                          |
+
+At every start the server generates two random 256-bit keys, `mcp` and `admin`, and writes them
+only to `/run/safe-azure/keys.json` inside the container (mode 0600, on a tmpfs). They change on
+every restart and are never logged. The `safe-azure` CLI reads them for you
+([ADR 0001](./adr/0001-cli-auth-install.md)); by hand, from your own terminal:
+`docker exec azure-safe-mcp cat /run/safe-azure/keys.json`.
 
 Check it: `docker compose ps` should show the container as `healthy` after about 30 seconds.
 
@@ -102,12 +108,17 @@ because tokens live in memory only.
 
 ## 4. Connect Claude Code
 
+Register the server through the `safe-azure mcp` stdio bridge. It reads the MCP key itself and adds
+it to every request, so no key is ever written to a client config file. The bridge comes with the
+`safe-azure` CLI (see [#60](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/60)–[#63](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/63)):
+
 ```bash
-claude mcp add --transport http azure-safe http://127.0.0.1:8765/mcp
+claude mcp add --scope user safe-azure -- safe-azure mcp
 ```
 
-That adds the server for you, in the current project (`--scope local`, the default). Use
-`--scope user` to have it in every project, or `--scope project` to write it to a shared `.mcp.json`.
+`--scope user` makes it available in every project. A plain HTTP registration without the key
+(`claude mcp add --transport http …/mcp`) no longer works: `/mcp` answers 401. Other clients:
+[CLIENTS.md](./CLIENTS.md).
 
 If you use it outside this repository, also copy the `permissions.deny` block from
 [`.claude/settings.json`](../.claude/settings.json) into `~/.claude/settings.json`. Those rules stop
@@ -117,18 +128,24 @@ Check with `claude mcp list`, or ask Claude: _"call server_info"_.
 
 ## 5. Sign in
 
-Each context is signed in separately, with Microsoft device-code login. The code is shown only on
-the `/login` page, never to the AI.
+Each context is signed in separately, with Microsoft device-code login, from **your own terminal**
+with the `safe-azure` CLI (it comes with the CLI, see
+[#60](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/60)–[#63](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/63)).
+The code is shown only there, never to the AI. The AI cannot start a sign-in.
 
 > **You:** Log me in to prod.
 >
-> **Claude:** _(calls `login`)_ Open http://127.0.0.1:8765/login to sign in to context 'prod'.
+> **Claude:** _(calls `login`)_ Ask the user to run `safe-azure login prod` in their own terminal.
+> The sign-in code is never shown here.
 
-1. Open http://127.0.0.1:8765/login. Under **Pending sign-ins** you see the context, a code such as
-   `ABCD1234`, a link to `https://microsoft.com/devicelogin` and the time left. The page refreshes
-   every 5 seconds.
-2. Open the link, enter the code and sign in with the account for that tenant.
-3. The context moves to **Signed-in contexts**, with the minutes left on the access token.
+1. In a terminal of your own (not one the agent drives), run `safe-azure login prod`. It refuses to
+   run without a TTY, and prints a code such as `ABCD1234` with the link
+   `https://microsoft.com/devicelogin`, which it opens in your browser.
+2. Enter the code and sign in with the account for that tenant.
+3. The CLI waits until the sign-in succeeds, fails or the code expires, and says so.
+
+Under the hood the CLI calls `POST /admin/login` and polls `GET /admin/login/prod` with the admin
+key. The admin API is the only place the code is ever returned.
 
 > **You:** Am I in?
 >
@@ -137,10 +154,10 @@ the `/login` page, never to the AI.
 
 Notes:
 
-- A code expires after 15 minutes. If the page says **Code expired** or **Sign-in failed**, ask for
-  `login` again.
+- A code expires after 15 minutes. If the CLI reports it expired or failed, run
+  `safe-azure login <alias>` again.
 - The access token is refreshed in memory while the session lasts. When it can no longer be
-  refreshed, tools answer `NotLoggedIn`: run `login` again.
+  refreshed, tools answer `NotLoggedIn`: run `safe-azure login <alias>` again.
 - `logout` drops a context's credential. Restarting the container drops all of them.
 
 ## 6. Switch contexts
@@ -156,7 +173,7 @@ subscription unless you pass a `subscription` alias.
 > **You:** Switch to lab.
 >
 > **Claude:** _(calls `use_context` with `alias: "lab"`)_ Context 'lab' is now active but not logged
-> in. _(calls `login`)_ Open http://127.0.0.1:8765/login to sign in to context 'lab'.
+> in. Ask the user to run `safe-azure login lab` in their own terminal.
 
 The active context is server-wide: every client connected to the server shares it.
 
@@ -173,13 +190,13 @@ The active context is server-wide: every client connected to the server shares i
 
 ### contexts
 
-| Tool            | Inputs   | Description                                                                                          |
-| --------------- | -------- | ---------------------------------------------------------------------------------------------------- |
-| `list_contexts` | none     | Declared contexts with their subscription aliases, which one is active and which ones are logged in. |
-| `use_context`   | `alias`  | Switches the active context. Every other tool then works on it.                                      |
-| `login`         | `alias?` | Starts a device-code sign-in (default: active context) and returns the `/login` URL for you to open. |
-| `login_status`  | `alias?` | Per context: logged in, sign-in pending or failed, and minutes left on the access token.             |
-| `logout`        | `alias`  | Drops the context's in-memory credential.                                                            |
+| Tool            | Inputs   | Description                                                                                            |
+| --------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `list_contexts` | none     | Declared contexts with their subscription aliases, which one is active and which ones are logged in.   |
+| `use_context`   | `alias`  | Switches the active context. Every other tool then works on it.                                        |
+| `login`         | `alias?` | A hint only: tells you to run `safe-azure login <alias>` yourself. Starts nothing, never shows a code. |
+| `login_status`  | `alias?` | Per context: logged in, sign-in pending or failed, and minutes left on the access token.               |
+| `logout`        | `alias`  | Drops the context's in-memory credential.                                                              |
 
 ### inventory
 
@@ -290,20 +307,20 @@ The example output below is shortened. All names and numbers are made up.
 
 ## 9. Troubleshooting
 
-| Symptom                                               | What to do                                                                                                                                                                                                     |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude mcp list` shows the server as failed          | `docker compose ps`: is the container up and healthy? `curl http://127.0.0.1:8765/healthz` from your own terminal should print `{"status":"ok"}`.                                                              |
-| The container restarts in a loop, "failed to start"   | The message is deliberately vague. Usually `config/contexts.yaml` is invalid: GUIDs not in GUID format, an alias with capitals or underscores, or a `defaultContext` that is not declared. Fix it and restart. |
-| Docker created a `contexts.yaml` **directory**        | The file did not exist when you first ran `docker compose up`. Remove the directory, copy the example file, and start again.                                                                                   |
-| `NoActiveContext`                                     | More than one context and no `defaultContext`. Call `use_context`.                                                                                                                                             |
-| `NotLoggedIn`                                         | Call `login` and finish the sign-in on `/login`. After a container restart this is expected.                                                                                                                   |
-| `/login` shows **Code expired** or **Sign-in failed** | Ask for `login` again. Make sure you sign in with an account of that context's tenant.                                                                                                                         |
-| `Azure returned HTTP 403`                             | The signed-in account lacks a read role on that subscription or workspace. See [SECURITY.md §6](./SECURITY.md#6-read-only-by-design-and-rbac).                                                                 |
-| `list_subscriptions` shows `NotVisible`               | The account cannot see that subscription: wrong tenant, wrong ID in `contexts.yaml`, or no role.                                                                                                               |
-| `ResourceNotFound` / `AmbiguousResource`              | Check the name with `search_resources`. When a name exists more than once, add `resourceGroup`, `type` or `subscription`.                                                                                      |
-| `KqlRejected`                                         | The guard refused the query (management command, `workspace()`, a non-allowlisted plugin, a timespan over 7 days…). The message says why.                                                                      |
-| `KqlQueryFailed` (HTTP 400)                           | Syntax error, or a table or column that does not exist. Check with `list_tables`.                                                                                                                              |
-| `QueryTimeout`                                        | Narrow the timespan, filter earlier, or summarize.                                                                                                                                                             |
-| A version number shows as `public-ip-external-NNN`    | Over-masking of dotted numbers ([SECURITY.md §8](./SECURITY.md#8-residual-risks)). Ask for the field in a different form, for example with `split()` in KQL.                                                   |
-| `Invalid Host` (HTTP 403) on `/mcp` or `/login`       | Use `127.0.0.1`, `localhost` or `[::1]` in the URL. Other host names are refused on purpose.                                                                                                                   |
-| The login link points to the wrong port               | The server builds it from `PORT` (or `PUBLIC_URL`), not from the request. If you change the published port in `docker-compose.yml`, add `PUBLIC_URL: http://127.0.0.1:<port>` to the service's `environment`.  |
+| Symptom                                             | What to do                                                                                                                                                                                                     |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude mcp list` shows the server as failed        | `docker compose ps`: is the container up and healthy? `curl http://127.0.0.1:8765/healthz` from your own terminal should print `{"status":"ok",…}`.                                                            |
+| The container restarts in a loop, "failed to start" | The message is deliberately vague. Usually `config/contexts.yaml` is invalid: GUIDs not in GUID format, an alias with capitals or underscores, or a `defaultContext` that is not declared. Fix it and restart. |
+| Docker created a `contexts.yaml` **directory**      | The file did not exist when you first ran `docker compose up`. Remove the directory, copy the example file, and start again.                                                                                   |
+| `NoActiveContext`                                   | More than one context and no `defaultContext`. Call `use_context`.                                                                                                                                             |
+| `NotLoggedIn`                                       | Run `safe-azure login <alias>` in your own terminal. After a container restart this is expected.                                                                                                               |
+| The CLI reports the code **expired** or **failed**  | Run `safe-azure login <alias>` again. Make sure you sign in with an account of that context's tenant.                                                                                                          |
+| HTTP 401 on `/mcp` or `/admin`                      | Missing or stale key: the keys change on every container restart. The CLI re-reads them on a 401. A raw HTTP client must send `Authorization: Bearer <mcp key>`.                                               |
+| `Azure returned HTTP 403`                           | The signed-in account lacks a read role on that subscription or workspace. See [SECURITY.md §6](./SECURITY.md#6-read-only-by-design-and-rbac).                                                                 |
+| `list_subscriptions` shows `NotVisible`             | The account cannot see that subscription: wrong tenant, wrong ID in `contexts.yaml`, or no role.                                                                                                               |
+| `ResourceNotFound` / `AmbiguousResource`            | Check the name with `search_resources`. When a name exists more than once, add `resourceGroup`, `type` or `subscription`.                                                                                      |
+| `KqlRejected`                                       | The guard refused the query (management command, `workspace()`, a non-allowlisted plugin, a timespan over 7 days…). The message says why.                                                                      |
+| `KqlQueryFailed` (HTTP 400)                         | Syntax error, or a table or column that does not exist. Check with `list_tables`.                                                                                                                              |
+| `QueryTimeout`                                      | Narrow the timespan, filter earlier, or summarize.                                                                                                                                                             |
+| A version number shows as `public-ip-external-NNN`  | Over-masking of dotted numbers ([SECURITY.md §8](./SECURITY.md#8-residual-risks)). Ask for the field in a different form, for example with `split()` in KQL.                                                   |
+| `Invalid Host` (HTTP 403) on `/mcp` or `/admin`     | Use `127.0.0.1`, `localhost` or `[::1]` in the URL. Other host names are refused on purpose.                                                                                                                   |

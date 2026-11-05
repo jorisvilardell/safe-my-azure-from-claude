@@ -25,6 +25,9 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+      # The keys file (/run/safe-azure/keys.json, 0600): memory only, gone on restart. The CLI
+      # reads it with `docker exec azure-safe-mcp cat /run/safe-azure/keys.json` (ADR 0001 §1).
+      - /run/safe-azure:uid=1000,gid=1000,mode=0700,noexec,nosuid,nodev,size=64k
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true

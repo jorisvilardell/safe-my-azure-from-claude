@@ -37,8 +37,9 @@ export function createContextsTools(deps: ContextsDeps): readonly ToolDefinition
       name: 'login',
       title: 'Login',
       description:
-        'Starts a Microsoft device-code sign-in for a context (default: the active one). Returns a local URL ' +
-        'that the HUMAN user must open in a browser to finish signing in. Relay it, then check login_status.',
+        'Tells you how the HUMAN user signs in to a context (default: the active one): they run ' +
+        '`safe-azure login <alias>` in their own terminal. This tool does not start a sign-in and never ' +
+        'returns a code. Relay the message, then check login_status.',
       inputSchema: LoginInput,
       handler: ({ alias }, ctx) => Promise.resolve(login(ctx.azure, deps, alias)),
     }),

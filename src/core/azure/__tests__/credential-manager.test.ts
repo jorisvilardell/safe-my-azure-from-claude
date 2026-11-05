@@ -40,6 +40,9 @@ describe('createCredentialManager', () => {
     for (const call of [
       () => manager.startLogin('nope'),
       () => manager.status('nope'),
+      () => manager.pendingLogin('nope'),
+      () => manager.loginState('nope'),
+      () => manager.waitForDeviceCode('nope', 10),
       () => {
         manager.logout('nope');
       },
@@ -79,12 +82,13 @@ describe('createCredentialManager', () => {
     expect(seen.every((s) => s.enableCae === true)).toBe(true);
   });
 
-  it('captures the device code for the login page only, then logs in on approval', async () => {
+  it('captures the device code for the admin API only, then logs in on approval', async () => {
     const { stub, manager, logs } = setup();
     expect(manager.startLogin('prod')).toBe('started');
     expect(manager.startLogin('prod')).toBe('already-pending');
 
-    const [pending] = manager.loginPageState().pending;
+    const pending = manager.pendingLogin('prod');
+    expect(manager.loginState('prod')).toBe('pending');
     expect(pending).toMatchObject({
       alias: 'prod',
       state: 'waiting',
@@ -104,8 +108,8 @@ describe('createCredentialManager', () => {
       loginFailed: false,
       expiresInMinutes: 30,
     });
-    expect(manager.loginPageState().pending).toEqual([]);
-    expect(manager.loginPageState().loggedIn.map((c) => c.alias)).toEqual(['prod']);
+    expect(manager.pendingLogin('prod')).toBeUndefined();
+    expect(manager.loginState('prod')).toBe('succeeded');
     expect(manager.startLogin('prod')).toBe('already-logged-in');
 
     const token = await manager.getCredential('prod').getToken(ARM_SCOPE);
@@ -121,7 +125,8 @@ describe('createCredentialManager', () => {
     await flushLogin();
 
     expect(manager.status('lab')).toMatchObject({ loggedIn: false, loginPending: false, loginFailed: true });
-    expect(manager.loginPageState().pending).toEqual([{ alias: 'lab', state: 'failed' }]);
+    expect(manager.pendingLogin('lab')).toEqual({ alias: 'lab', state: 'failed' });
+    expect(manager.loginState('lab')).toBe('failed');
     expect(logs.join('\n')).not.toContain(FAKE_USER_CODE);
     expect(logs.join('\n')).not.toContain('AADSTS');
 
@@ -138,7 +143,8 @@ describe('createCredentialManager', () => {
     stub.fail(); // the second one, after its code expired too
     t += 16 * 60_000;
     await flushLogin();
-    expect(manager.loginPageState().pending).toEqual([{ alias: 'prod', state: 'expired' }]);
+    expect(manager.pendingLogin('prod')).toEqual({ alias: 'prod', state: 'expired' });
+    expect(manager.loginState('prod')).toBe('expired');
   });
 
   it('logout drops the credential and aborts a pending login', async () => {
@@ -153,7 +159,9 @@ describe('createCredentialManager', () => {
     manager.startLogin('lab');
     manager.logout('lab');
     await flushLogin();
-    expect(manager.loginPageState()).toEqual({ pending: [], loggedIn: [] });
+    expect(manager.pendingLogin('lab')).toBeUndefined();
+    expect(manager.loginState('lab')).toBe('none');
+    expect(manager.loginState('prod')).toBe('none');
     stub.approve(); // a late approval of the aborted flow must not log it in
     await flushLogin();
     expect(manager.isLoggedIn('lab')).toBe(false);
@@ -199,5 +207,80 @@ describe('createCredentialManager', () => {
     expect(changes).toEqual(['prod:login', 'prod:logout', 'lab:login', 'lab:logout']);
     expect(logs.join('\n')).toContain('session listener failed');
     expect(logs.join('\n')).not.toContain('listener bug');
+  });
+
+  it('reports a code that ran out while still waiting as expired', () => {
+    let t = 1_000_000;
+    const { manager } = setup(() => t);
+    manager.startLogin('prod');
+    expect(manager.loginState('prod')).toBe('pending');
+    t += 16 * 60_000;
+    expect(manager.loginState('prod')).toBe('expired');
+  });
+
+  describe('waitForDeviceCode', () => {
+    /** A credential whose device code arrives only when `send()` is called. */
+    function lateCode() {
+      let send: () => void = () => undefined;
+      let fail: () => void = () => undefined;
+      const manager = createCredentialManager({
+        contexts: FAKE_CONTEXTS,
+        logger: createLogger('error', { write: () => undefined }),
+        factory: ({ onDeviceCode }) => ({
+          authenticate: () =>
+            new Promise((_resolve, reject) => {
+              send = () => {
+                onDeviceCode({
+                  userCode: FAKE_USER_CODE,
+                  verificationUri: FAKE_VERIFICATION_URI,
+                  message: '',
+                });
+              };
+              fail = () => {
+                reject(new Error('nope'));
+              };
+            }),
+          getToken: () => Promise.resolve(null),
+        }),
+      });
+      return {
+        manager,
+        send: () => {
+          send();
+        },
+        fail: () => {
+          fail();
+        },
+      };
+    }
+
+    it('resolves at once when there is no login or the code is already there', async () => {
+      const { manager } = setup();
+      expect(await manager.waitForDeviceCode('prod', 10)).toBeUndefined();
+      manager.startLogin('prod');
+      expect(await manager.waitForDeviceCode('prod', 10)).toMatchObject({ userCode: FAKE_USER_CODE });
+    });
+
+    it('waits for the code to arrive', async () => {
+      const { manager, send } = lateCode();
+      manager.startLogin('prod');
+      const waiting = manager.waitForDeviceCode('prod', 5_000);
+      setTimeout(send, 5);
+      expect(await waiting).toMatchObject({ state: 'waiting', userCode: FAKE_USER_CODE });
+    });
+
+    it('resolves with the failure when the flow fails first', async () => {
+      const { manager, fail } = lateCode();
+      manager.startLogin('prod');
+      const waiting = manager.waitForDeviceCode('prod', 5_000);
+      fail();
+      expect(await waiting).toEqual({ alias: 'prod', state: 'failed' });
+    });
+
+    it('gives up after the timeout, still starting', async () => {
+      const { manager } = lateCode();
+      manager.startLogin('prod');
+      expect(await manager.waitForDeviceCode('prod', 5)).toEqual({ alias: 'prod', state: 'starting' });
+    });
   });
 });
