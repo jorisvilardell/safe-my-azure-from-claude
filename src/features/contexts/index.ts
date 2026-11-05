@@ -5,7 +5,7 @@ import { createContextsTools } from './contexts.tools.js';
 export function createContextsFeature(deps: ContextsDeps): Feature {
   return defineFeature({
     name: 'contexts',
-    description: 'Azure context (tenant alias) switching and device-code login.',
+    description: 'Azure context (tenant alias) switching, login status and logout.',
     tools: createContextsTools(deps),
   });
 }

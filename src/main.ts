@@ -2,13 +2,14 @@ import { readFileSync } from 'node:fs';
 import { buildFeatures } from './app/features.js';
 import { startHttpServer } from './app/server.js';
 import { createAnonymizer, type AnonymizerConfig } from './core/anonymizer/index.js';
+import { generateKeys, writeKeysFile } from './core/auth/index.js';
 import {
   createAzureAccess,
   createContextStore,
   createCredentialManager,
   createPublicIpIndex,
 } from './core/azure/index.js';
-import { contextIdAliases, loadContexts, loadEnv, loginPageUrl } from './core/config/index.js';
+import { contextIdAliases, loadContexts, loadEnv } from './core/config/index.js';
 import type { ToolContext } from './core/mcp/index.js';
 import { createAuditLog, createLogger, silenceAzureSdkLogging } from './core/logging/index.js';
 
@@ -61,7 +62,12 @@ async function main(): Promise<void> {
   const publicIpIndex = createPublicIpIndex(azure.inventory);
   const anonymizer = createAnonymizer({ ...anonymizerConfig, publicIpIndex });
   const ctx: ToolContext = { anonymizer, logger, azure, audit };
-  const features = buildFeatures({ version, logins: credentials, loginUrl: loginPageUrl(env) });
+  const features = buildFeatures({ version, logins: credentials });
+
+  // New keys on every start (ADR 0001 §1). They go to the keys file and to the HTTP app, nowhere
+  // else: never to the logger, the env, a tool or an error. A write failure is fatal (fail closed).
+  const keys = generateKeys();
+  writeKeysFile(env.KEYS_FILE, keys);
 
   logger.info('starting', {
     version,
@@ -78,7 +84,8 @@ async function main(): Promise<void> {
     ctx,
     logger,
     inventoryResource: env.INVENTORY_RESOURCE === 'on',
-    loginPageState: () => credentials.loginPageState(),
+    keys,
+    admin: { logins: credentials, contexts: store },
   });
 
   const shutdown = (): void => {

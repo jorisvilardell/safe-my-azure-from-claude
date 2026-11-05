@@ -7,6 +7,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildFeatures } from '../../src/app/features.js';
 import { startHttpServer } from '../../src/app/server.js';
+import { generateKeys } from '../../src/core/auth/index.js';
 import { INVENTORY_QUERY } from '../../src/core/azure/index.js';
 import * as v from '../fixtures/azure/values.js';
 import { createAnonymizer } from '../../src/core/anonymizer/index.js';
@@ -22,6 +23,7 @@ import {
   expectNoLeak,
   FAKE_CONTEXTS,
   FAKE_RESOURCES,
+  FAKE_USER_CODE,
   toLeakText,
 } from '../helpers/index.js';
 import { sampleArgs } from '../helpers/schema-sample.js';
@@ -76,11 +78,14 @@ const LEAKY_INVENTORY_ROWS: readonly unknown[] = [
 ];
 // Stubbed device-code login: the contexts tools run for real, without touching Azure.
 const loginRig = createLoginRig();
-const features = buildFeatures({
-  version: VERSION,
-  logins: loginRig.manager,
-  loginUrl: 'http://127.0.0.1:8765/login',
-});
+const features = buildFeatures({ version: VERSION, logins: loginRig.manager });
+const keys = generateKeys();
+const admin = { logins: loginRig.manager, contexts: loginRig.azure.contexts };
+/** What `safe-azure mcp` adds to every request. */
+const authorized = (url: URL): StreamableHTTPClientTransport =>
+  new StreamableHTTPClientTransport(url, {
+    requestInit: { headers: { authorization: `Bearer ${keys.mcp}` } },
+  });
 const TOOL_NAMES = features.flatMap((f) => f.tools.map((t) => t.name));
 
 // The inventory index is on, so the tools also run their "served from memory" path.
@@ -123,14 +128,15 @@ beforeAll(async () => {
     features,
     ctx,
     logger: ctx.logger,
-    loginPageState: () => loginRig.manager.loginPageState(),
+    keys,
+    admin,
   });
   if (!server.listening) await once(server, 'listening');
   const { port } = server.address() as AddressInfo;
   baseUrl = new URL(`http://127.0.0.1:${port}/mcp`);
 
   client = new Client({ name: 'leak-harness', version: VERSION });
-  await client.connect(new StreamableHTTPClientTransport(baseUrl));
+  await client.connect(authorized(baseUrl));
   const listed = await client.listTools();
   expectNoLeak(listed);
   listedTools = listed.tools;
@@ -148,6 +154,10 @@ afterAll(async () => {
   // Server logs go to stderr in production, which an agent may read: they must be clean too.
   expectNoLeak(logLines);
   expectNoLeak(auditLines);
+  for (const line of [...logLines, ...auditLines]) {
+    expect(line).not.toContain(keys.mcp);
+    expect(line).not.toContain(keys.admin);
+  }
 });
 
 async function callAndCheck(tool: Tool, full: boolean): Promise<void> {
@@ -233,14 +243,13 @@ describe('MCP inventory resource', () => {
         ctx,
         logger: ctx.logger,
         inventoryResource: true,
-        loginPageState: () => loginRig.manager.loginPageState(),
+        keys,
+        admin,
       });
       if (!resourceServer.listening) await once(resourceServer, 'listening');
       const { port } = resourceServer.address() as AddressInfo;
       resourceClient = new Client({ name: 'leak-harness-resources', version: VERSION });
-      await resourceClient.connect(
-        new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)),
-      );
+      await resourceClient.connect(authorized(new URL(`http://127.0.0.1:${port}/mcp`)));
     });
 
     afterAll(async () => {
@@ -336,6 +345,25 @@ describe('prompt injection in tool results (#39)', () => {
   });
 });
 
+describe('sign-in over MCP and the admin API', () => {
+  it('the login tool never returns the code, which only POST /admin/login does', async () => {
+    const adminRes = await fetch(new URL('/admin/login', baseUrl), {
+      method: 'POST',
+      headers: { authorization: `Bearer ${keys.admin}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ context: 'lab' }),
+    });
+    expect(adminRes.status).toBe(200);
+    expect(await adminRes.json()).toMatchObject({ context: 'lab', userCode: FAKE_USER_CODE });
+
+    const result = await client.callTool({ name: 'login', arguments: { alias: 'lab' } });
+    const text = toLeakText(result);
+    expectNoLeak(result);
+    expect(text).not.toContain(FAKE_USER_CODE);
+    expect(text).toContain('safe-azure login lab');
+    loginRig.manager.logout('lab');
+  });
+});
+
 describe('HTTP transport hardening', () => {
   it('rejects a foreign Host header with 403 (DNS rebinding)', async () => {
     const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
@@ -369,8 +397,44 @@ describe('HTTP transport hardening', () => {
   });
 
   it('answers GET /mcp with 405', async () => {
-    const res = await fetch(baseUrl, { headers: { accept: 'text/event-stream' } });
+    const res = await fetch(baseUrl, {
+      headers: { accept: 'text/event-stream', authorization: `Bearer ${keys.mcp}` },
+    });
     expect(res.status).toBe(405);
     expectNoLeak(await res.text());
+  });
+
+  it('refuses an MCP client without the key with 401', async () => {
+    const anonymous = new Client({ name: 'no-key', version: VERSION });
+    const err: unknown = await anonymous
+      .connect(new StreamableHTTPClientTransport(baseUrl))
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expectNoLeak(err instanceof Error ? err.message : err);
+
+    const res = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get('www-authenticate')).toBe('Bearer');
+    expect(await res.json()).toMatchObject({ jsonrpc: '2.0', error: { code: -32001 }, id: null });
+  });
+
+  it('refuses the admin key on /mcp and the MCP key on /admin', async () => {
+    const asAdmin = await fetch(baseUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        authorization: `Bearer ${keys.admin}`,
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(asAdmin.status).toBe(401);
+    const adminUrl = new URL('/admin/contexts', baseUrl);
+    const asMcp = await fetch(adminUrl, { headers: { authorization: `Bearer ${keys.mcp}` } });
+    expect(asMcp.status).toBe(401);
   });
 });

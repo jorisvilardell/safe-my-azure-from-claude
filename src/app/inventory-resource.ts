@@ -49,7 +49,10 @@ async function readInventory(ctx: ToolContext, alias: string): Promise<Inventory
     );
   }
   if (!context.loggedIn) {
-    throw new AppError('NotLoggedIn', `Context "${alias}" is not logged in. Run the login tool first.`);
+    throw new AppError(
+      'NotLoggedIn',
+      `Context "${alias}" is not logged in. Ask the user to run \`safe-azure login ${alias}\` in their own terminal.`,
+    );
   }
   if (!ctx.azure.inventory.enabled) {
     throw new AppError('InventoryUnavailable', 'The inventory index is disabled. Use search_resources.');

@@ -10,9 +10,8 @@ import { createSystemFeature } from '../features/system/index.js';
 
 export interface FeatureDeps {
   readonly version: string;
+  /** Status and logout only: the AI-facing tools can never start a sign-in or see a code. */
   readonly logins: LoginController;
-  /** Absolute URL of the /login page, built from config. */
-  readonly loginUrl: string;
 }
 
 /** The list of enabled features. Register new feature slices here (AGENTS.md §2). */
@@ -20,7 +19,7 @@ export function buildFeatures(deps: FeatureDeps): Feature[] {
   const features: Feature[] = [];
   features.push(
     createSystemFeature({ version: deps.version, listFeatures: () => features }),
-    createContextsFeature({ logins: deps.logins, loginUrl: deps.loginUrl }),
+    createContextsFeature({ logins: deps.logins }),
     createInventoryFeature(),
     createAlertsFeature(),
     createMetricsFeature(),

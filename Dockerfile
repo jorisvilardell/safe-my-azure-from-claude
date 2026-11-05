@@ -19,6 +19,9 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/package.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
+# The server writes its MCP/admin keys to /run/safe-azure/keys.json (0600) at startup (ADR 0001).
+# docker-compose mounts a tmpfs here; this directory is the fallback for a plain `docker run`.
+RUN mkdir -p /run/safe-azure && chown node:node /run/safe-azure && chmod 700 /run/safe-azure
 USER node
 EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:8765/healthz || exit 1

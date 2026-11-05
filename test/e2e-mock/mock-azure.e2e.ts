@@ -12,9 +12,14 @@ import { sampleArgs } from '../helpers/schema-sample.js';
  * mocked by Dev Proxy (mocks/devproxy). Run with `npm run test:e2e-mock` once the stack is up.
  *
  *   E2E_MOCK_MODE=chaos  the proxy runs devproxyrc.chaos.json: failures must be clean AppErrors.
+ *
+ * It reads the server keys the way the `safe-azure` CLI does (ADR 0001 §1):
+ * `docker exec <container> cat /run/safe-azure/keys.json`. It then signs in through the admin API
+ * (`POST /admin/login`, polled with `GET /admin/login/:context`), and calls the tools with the MCP key.
  */
 
 const MCP_URL = new URL(process.env.E2E_MCP_URL ?? 'http://127.0.0.1:8765/mcp');
+const KEYS_FILE = '/run/safe-azure/keys.json';
 const CHAOS = process.env.E2E_MOCK_MODE === 'chaos';
 const PROXY_CONTAINER = process.env.E2E_DEVPROXY_CONTAINER ?? 'azure-safe-devproxy';
 const SERVER_CONTAINER = process.env.E2E_SERVER_CONTAINER ?? 'azure-safe-mcp';
@@ -49,8 +54,44 @@ function expectCleanError(name: string, result: CallToolResult): void {
   );
 }
 
+interface Keys {
+  readonly mcp: string;
+  readonly admin: string;
+}
+
+let keys: Keys;
 let client: Client;
 let tools: Tool[];
+
+function docker(args: readonly string[]): string {
+  const res = spawnSync('docker', args, { encoding: 'utf8' });
+  if (res.status !== 0) throw new Error(`docker ${args[0] ?? ''} failed: ${res.stderr}`);
+  return res.stdout;
+}
+
+function readKeys(): Keys {
+  const parsed = JSON.parse(docker(['exec', SERVER_CONTAINER, 'cat', KEYS_FILE])) as Partial<Keys>;
+  if (typeof parsed.mcp !== 'string' || typeof parsed.admin !== 'string') {
+    throw new Error(`${KEYS_FILE} does not hold {mcp, admin}`);
+  }
+  return { mcp: parsed.mcp, admin: parsed.admin };
+}
+
+const keyCanaries = (): readonly Canary[] => [
+  ['MCP key', keys.mcp],
+  ['admin key', keys.admin],
+];
+
+async function adminCall(method: 'GET' | 'POST', path: string, body?: unknown): Promise<Response> {
+  return fetch(new URL(`/admin${path}`, MCP_URL), {
+    method,
+    headers: {
+      authorization: `Bearer ${keys.admin}`,
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
 const calls: { name: string; ms: number; isError: boolean }[] = [];
 
 async function call(name: string, args: Record<string, unknown> = {}): Promise<CallToolResult> {
@@ -96,8 +137,13 @@ function dockerLogs(container: string): string {
 }
 
 beforeAll(async () => {
+  keys = readKeys();
   client = new Client({ name: 'e2e-mock', version: '0.0.0' });
-  await client.connect(new StreamableHTTPClientTransport(MCP_URL));
+  await client.connect(
+    new StreamableHTTPClientTransport(MCP_URL, {
+      requestInit: { headers: { authorization: `Bearer ${keys.mcp}` } },
+    }),
+  );
   const listed = await client.listTools();
   expectNoLeak(listed);
   tools = listed.tools;
@@ -113,24 +159,50 @@ afterAll(async () => {
 });
 
 describe(`mocked Azure over MCP (${CHAOS ? 'chaos' : 'mocks'})`, () => {
-  it('logs in against the mocked Entra ID device-code flow, with no human', async () => {
-    const started = await call('login', { alias: 'prod' });
-    expect(textOf(started)).toContain('/login');
+  it('keeps the keys file 0600, owned by the server user, on the tmpfs', () => {
+    expect(docker(['exec', SERVER_CONTAINER, 'stat', '-c', '%a %U', KEYS_FILE]).trim()).toBe('600 node');
+  });
+
+  it('refuses /mcp without the key and /admin with the MCP key', async () => {
+    const noKey = await fetch(MCP_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(noKey.status).toBe(401);
+    const wrongKey = await fetch(new URL('/admin/contexts', MCP_URL), {
+      headers: { authorization: `Bearer ${keys.mcp}` },
+    });
+    expect(wrongKey.status).toBe(401);
+  });
+
+  it('the login tool only points to the CLI', async () => {
+    const hint = await call('login', { alias: 'prod' });
+    expect(textOf(hint)).toContain('safe-azure login prod');
+  });
+
+  it('logs in through the admin API against the mocked Entra ID device-code flow, with no human', async () => {
+    const started = await adminCall('POST', '/login', { context: 'prod' });
+    expect(started.status, 'POST /admin/login').toBe(200);
+    expect(started.headers.get('cache-control')).toBe('no-store');
+    const body = (await started.json()) as { context: string; userCode: string; verificationUri: string };
+    expect(body).toMatchObject({ context: 'prod', userCode: 'FAKEUC7Q2' });
 
     const deadline = Date.now() + 60_000;
-    let loggedIn = false;
-    while (!loggedIn && Date.now() < deadline) {
-      const status = jsonOf(await call('login_status', { alias: 'prod' })) as {
-        contexts: { loggedIn: boolean; loginFailed: boolean }[];
-      };
-      loggedIn = status.contexts.some((c) => c.loggedIn);
-      expect(
-        status.contexts.some((c) => c.loginFailed),
-        'login failed against the Entra ID mock',
-      ).toBe(false);
-      if (!loggedIn) await new Promise((r) => setTimeout(r, 500));
+    let state = 'pending';
+    while (state === 'pending' && Date.now() < deadline) {
+      const res = await adminCall('GET', '/login/prod');
+      expect(res.status, 'GET /admin/login/prod').toBe(200);
+      ({ state } = (await res.json()) as { state: string });
+      if (state === 'pending') await new Promise((r) => setTimeout(r, 500));
     }
-    expect(loggedIn, 'login did not complete within 60 s').toBe(true);
+    expect(state, 'login did not succeed against the Entra ID mock within 60 s').toBe('succeeded');
+
+    // The MCP side sees flags only.
+    const status = jsonOf(await call('login_status', { alias: 'prod' })) as {
+      contexts: { loggedIn: boolean }[];
+    };
+    expect(status.contexts.some((c) => c.loggedIn)).toBe(true);
   });
 
   it('answers the targeted investigation calls', async () => {
@@ -187,11 +259,14 @@ describe(`mocked Azure over MCP (${CHAOS ? 'chaos' : 'mocks'})`, () => {
   });
 
   it.runIf(READ_DOCKER_LOGS)('kept the server logs clean', () => {
-    expectNoLeak(dockerLogs(SERVER_CONTAINER));
+    const logs = dockerLogs(SERVER_CONTAINER);
+    expectNoLeak(logs);
+    assertNoLeakWith(logs, [], keyCanaries());
   });
 
   it.runIf(READ_DOCKER_LOGS)('sent the real (fake) IDs to Azure: they were stripped, not absent', () => {
     const proxyLog = dockerLogs(PROXY_CONTAINER);
+    assertNoLeakWith(proxyLog, [], keyCanaries());
     // Request URLs Dev Proxy logged: the activity log is per subscription, the KQL query per workspace.
     expect(proxyLog.toLowerCase()).toContain(
       `/subscriptions/${v.SUBSCRIPTION_ID}/providers/microsoft.insights`,

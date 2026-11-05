@@ -8,6 +8,7 @@ It describes the code as it is on `main`. Planned work is marked as planned, wit
 - [3. Trust boundaries](#3-trust-boundaries)
 - [4. What the AI can and cannot see](#4-what-the-ai-can-and-cannot-see)
 - [5. Login: device code, Docker and an in-memory token](#5-login-device-code-docker-and-an-in-memory-token)
+  - [Server keys](#server-keys)
 - [6. Read-only by design, and RBAC](#6-read-only-by-design-and-rbac)
 - [7. Claude Code deny rules](#7-claude-code-deny-rules)
 - [8. Residual risks](#8-residual-risks)
@@ -121,7 +122,7 @@ and correlation IDs.
 Server logs are JSON lines on **stderr only** (`core/logging`). Every line goes through the same
 anonymiser, with the same aliases and `safeTagKeys`, but without the public IP index (a log line
 must never trigger an Azure call), so public IPs in logs are always `public-ip-external-NNN`. The
-code never logs headers, credentials, device codes or full SDK responses. Failed logins drop the
+code never logs headers, credentials, device codes, the server keys or full SDK responses. Failed logins drop the
 SDK error on purpose, because it may echo the device-code response.
 
 ### Layer 5: Azure SDK logging is silenced
@@ -147,14 +148,14 @@ error prints a fixed message only.
  Host (your Windows session)                                Docker Desktop VM
 ┌───────────────────────────────────────┐                ┌─────────────────────────────────────┐
 │                                       │  MCP over      │ container azure-safe-mcp            │
-│  Claude Code / other MCP client ──────┼─ HTTP ────────▶│  read-only rootfs, cap_drop ALL,    │
-│   (AI agent, untrusted with secrets)  │  127.0.0.1:8765│  no-new-privileges, user "node"     │
-│        ▲  tool results: scrubbed JSON │  /mcp          │                                     │
+│  MCP client ─▶ safe-azure mcp ────────┼─ HTTP ────────▶│  read-only rootfs, cap_drop ALL,    │
+│   (AI agent, untrusted with secrets)  │  /mcp + Bearer │  no-new-privileges, user "node"     │
+│        ▲  tool results: scrubbed JSON │  <mcp key>     │                                     │
 │        └──────────────────────────────┼────────────────│  tool ─▶ mapper ─▶ scrub() ─▶ result│
 │                                       │                │                                     │
-│  Browser (you, the human) ────────────┼─ HTTP ────────▶│  /login: device code, human only    │
-│        │                              │  /login        │                                     │
-│        │                              │                │  token cache: process memory only   │
+│  safe-azure login (you, in a TTY) ────┼─ HTTP ────────▶│  /admin: device code, human only    │
+│        │                              │  /admin+Bearer │  keys: /run/safe-azure (tmpfs, 0600)│
+│        │                              │  <admin key>   │  token cache: process memory only   │
 │        ▼                              │                │           │                         │
 │  microsoft.com/devicelogin (sign in)  │                └───────────┼─────────────────────────┘
 └────────┼──────────────────────────────┘                            │ HTTPS, read-only calls
@@ -164,12 +165,12 @@ error prints a fixed message only.
                                           the container)      App Insights, Advisor)
 ```
 
-| Boundary                    | What crosses it                                                          | Control                                                                                                                                                                                                                  |
-| --------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| AI client ⇄ MCP server      | Tool calls (names, aliases, pseudonyms, KQL) and scrubbed results        | Port published on `127.0.0.1` only. Host-header allowlist (`localhost`, `127.0.0.1`, `[::1]`) against DNS rebinding. Stateless Streamable HTTP. zod-validated inputs. Every result scrubbed. No authentication (see §8). |
-| Browser ⇄ `/login`          | Device code and verification URL, to the human                           | Same loopback port and host check. Strict CSP (no scripts, no forms, no framing), `no-store`, `no-referrer`. Never reachable through a tool.                                                                             |
-| Container ⇄ Entra ID, Azure | Device-code flow, tokens, read-only API calls                            | `DeviceCodeCredential` with no persistent cache. Only GET-style APIs, Resource Graph and query APIs are called.                                                                                                          |
-| Host ⇄ container            | `config/contexts.yaml` mounted read-only (aliases and GUIDs, no secrets) | Read-only root filesystem, `tmpfs` `/tmp`, all capabilities dropped, `no-new-privileges`, non-root user. No volume for tokens.                                                                                           |
+| Boundary                    | What crosses it                                                                                                            | Control                                                                                                                                                                                                                                                               |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AI client ⇄ MCP server      | Tool calls (names, aliases, pseudonyms, KQL) and scrubbed results                                                          | Port published on `127.0.0.1` only. Host-header allowlist (`localhost`, `127.0.0.1`, `[::1]`) against DNS rebinding. `Authorization: Bearer <mcp key>`, constant-time compare, 401 otherwise. Stateless Streamable HTTP. zod-validated inputs. Every result scrubbed. |
+| CLI ⇄ `/admin/*`            | Sign-in start (device code and verification URL, to the human), status, logout, context switch                             | Same loopback port and host check. A separate `Bearer <admin key>`, constant-time compare. `Cache-Control: no-store`. zod-validated bodies. Never reachable through a tool; the user code is never logged.                                                            |
+| Container ⇄ Entra ID, Azure | Device-code flow, tokens, read-only API calls                                                                              | `DeviceCodeCredential` with no persistent cache. Only GET-style APIs, Resource Graph and query APIs are called.                                                                                                                                                       |
+| Host ⇄ container            | `config/contexts.yaml` mounted read-only (aliases and GUIDs, no secrets); the keys file read by the CLI with `docker exec` | Read-only root filesystem, `tmpfs` `/tmp` and `/run/safe-azure`, all capabilities dropped, `no-new-privileges`, non-root user. No volume for tokens or keys.                                                                                                          |
 
 ## 4. What the AI can and cannot see
 
@@ -192,8 +193,9 @@ error prints a fixed message only.
 
 ### It cannot see
 
-- Any token, refresh token, MSAL cache, device code or `Authorization` header. Tools have no access
-  to them: the contexts feature only gets a `LoginController` that exposes flags and minutes.
+- Any token, refresh token, MSAL cache, device code, server key or `Authorization` header. Tools
+  have no access to them: the contexts feature only gets a `LoginController` that exposes flags,
+  minutes and logout. It cannot even start a sign-in.
 - Tenant, subscription and object GUIDs, ARM IDs, Log Analytics workspace IDs.
 - Public IPs, emails, UPNs and people's display names in identity objects.
 - Secrets that match the patterns in §2 (layer 3).
@@ -202,21 +204,24 @@ error prints a fixed message only.
 
 ## 5. Login: device code, Docker and an in-memory token
 
-1. The AI calls `login`. The server starts a Microsoft device-code flow for that context's tenant
-   and answers with a fixed message: _"Open http://127.0.0.1:8765/login to sign in to context
-   'prod'."_ The code is **not** in the result.
-2. You open `/login` in a browser. The page shows the code, the Microsoft link and the time left
-   (codes expire after 15 minutes), and refreshes itself every 5 seconds.
+1. If the AI calls `login`, it only gets a fixed hint: _"Ask the user to run
+   `safe-azure login prod` in their own terminal. The sign-in code is never shown here."_ The
+   tool starts **nothing**: an agent can never open a sign-in you did not ask for.
+2. You run `safe-azure login prod` in your own terminal. The CLI refuses to run without a TTY
+   (agent shells are not TTYs), calls `POST /admin/login` with the admin key, and prints the code
+   and the Microsoft link (codes expire after 15 minutes). `POST /admin/login` is the only place
+   the code is ever returned.
 3. You sign in at Microsoft with the account for that context. The token goes from Entra ID to the
-   container, not to the browser and not to the AI.
+   container, not to the browser, not to the CLI and not to the AI. The CLI polls
+   `GET /admin/login/prod` until the state is `succeeded`, `failed` or `expired`.
 4. `login_status` then reports `loggedIn: true` and the minutes left on the access token.
 
 Why this design:
 
 - **Device code** needs no app registration, no client secret and no redirect URI. The server uses
-  the default public client. The code is shown on a page that only the human opens.
+  the default public client. The code is shown only by the CLI, in the human's terminal.
   `disableAutomaticAuthentication` is set, so a tool call can never silently start a new sign-in:
-  an expired session returns `NotLoggedIn` and the human has to run `login` again.
+  an expired session returns `NotLoggedIn` and the human has to run `safe-azure login` again.
 - **Docker** puts the token in another process, in another (Linux VM) user space, behind a
   read-only filesystem. On the host, Claude Code can run shell commands as you: if the server ran
   as your user, the AI could read its memory or its files. With Docker, the only way in is the
@@ -226,6 +231,20 @@ Why this design:
   steal (a persisted, encrypted cache is discussed in
   [#14](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/14)).
 - `logout` drops the credential object of a context.
+
+### Server keys
+
+- At every start the server generates two random 256-bit keys (`crypto.randomBytes`, base64url):
+  `mcp` for `/mcp` and `admin` for `/admin/*` ([ADR 0001](./adr/0001-cli-auth-install.md)).
+- They are written **only** to `/run/safe-azure/keys.json` (`KEYS_FILE`), mode 0600 in a 0700
+  directory, on a container tmpfs owned by the `node` user. They are never logged, never in env,
+  never on a volume, and the keys module takes no logger. A restart makes new keys.
+- Both are checked with `crypto.timingSafeEqual` over SHA-256 digests, so the comparison always
+  covers two 32-byte buffers. A missing or wrong key gets 401 with `WWW-Authenticate: Bearer`
+  (a JSON-RPC error body on `/mcp`). The MCP key does not open `/admin`, and the reverse.
+- The CLI reads them with `docker exec <container> cat /run/safe-azure/keys.json`. The deny rules
+  (§7), and the CLI's Claude Code hook, block `docker exec` for agents.
+- `/healthz` stays unauthenticated and returns only `{status, version}`.
 
 ## 6. Read-only by design, and RBAC
 
@@ -260,22 +279,22 @@ The MCP server only protects what goes **through** it. Claude Code also has a sh
 and web fetch on your machine, and your machine can still run `az`, `docker exec` and so on. So
 `.claude/settings.json` denies the obvious ways around the server:
 
-| Rule                                                                                        | Why                                                                                   |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `Bash(az login:*)`, `Bash(az account get-access-token:*)`                                   | Getting a token directly from the Azure CLI.                                          |
-| `Bash(az account show:*)`, `Bash(az ad:*)`                                                  | Printing tenant and subscription IDs, users and groups.                               |
-| `Bash(docker exec:*)`, `Bash(docker cp:*)`, `Bash(docker inspect:*)`, `Bash(docker logs:*)` | Reaching into the container that holds the token, or reading its config and logs.     |
-| `Read(~/.azure/**)`                                                                         | The Azure CLI token cache on the host.                                                |
-| `Read(./config/contexts.yaml)`, `Read(./.env)`                                              | Real tenant and subscription IDs.                                                     |
-| `WebFetch(domain:127.0.0.1)`, `WebFetch(domain:localhost)`                                  | Reading the `/login` page (the device code) or calling `/mcp` outside the MCP client. |
+| Rule                                                                                        | Why                                                                                            |
+| ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `Bash(az login:*)`, `Bash(az account get-access-token:*)`                                   | Getting a token directly from the Azure CLI.                                                   |
+| `Bash(az account show:*)`, `Bash(az ad:*)`                                                  | Printing tenant and subscription IDs, users and groups.                                        |
+| `Bash(docker exec:*)`, `Bash(docker cp:*)`, `Bash(docker inspect:*)`, `Bash(docker logs:*)` | Reaching into the container that holds the token and the keys, or reading its config and logs. |
+| `Read(~/.azure/**)`                                                                         | The Azure CLI token cache on the host.                                                         |
+| `Read(./config/contexts.yaml)`, `Read(./.env)`                                              | Real tenant and subscription IDs.                                                              |
+| `WebFetch(domain:127.0.0.1)`, `WebFetch(domain:localhost)`                                  | Calling `/mcp` or `/admin` outside the MCP client.                                             |
 
 Important limits:
 
 - These rules are **project settings**: they apply only when Claude Code runs in this repository.
   If you use the server from other projects, copy the `permissions.deny` block into your user
   settings (`~/.claude/settings.json`).
-- A deny list is not a sandbox. Other commands can reach the same things (`curl
-http://127.0.0.1:8765/login`, `Get-Content`, `type`, another CLI that holds Azure tokens). Keep
+- A deny list is not a sandbox. Other commands can reach the same things (`Get-Content`, `type`,
+  another CLI that holds Azure tokens; `curl` to `/mcp` now needs the key). Keep
   Claude Code in its default "ask before running" mode for shell commands while this server is in
   use, and consider adding deny rules for the HTTP clients of your shell (`curl`,
   `Invoke-WebRequest`) when they target port 8765. Other
@@ -324,10 +343,12 @@ instructions`, `you are now`, `system:`, `<|…|>`, tool-call-shaped JSON, …) 
    Until it is ready, or for an IP created since the last refresh, your own IP shows as
    `public-ip-external-NNN`, and the same IP may later show as `public-ip-<name>`. The fallback
    always hides the address.
-7. **No authentication on `/mcp` and `/login`.** Any process on your machine that can reach
-   `127.0.0.1:8765` can call the tools (the results are scrubbed) and read the `/login` page. The
-   loopback binding and host-header check keep the network and malicious web pages out, not local
-   processes.
+7. **Local processes that can read the keys.** `/mcp` and `/admin` need their Bearer keys
+   (fixed: the old "no authentication on `/mcp` and `/login`" risk), and the `/login` page is
+   gone. But a process running as you that can run `docker exec` (or read the CLI's key cache) can
+   get the keys: the admin key starts a sign-in and returns its code. The deny rules, the CLI hook,
+   its TTY check and its encrypted key cache raise the bar; they are not a sandbox
+   ([ADR 0001](./adr/0001-cli-auth-install.md)).
 8. **Same-user host in a future native mode.** A native Windows mode with broker login is
    **planned** ([#15](https://github.com/jorisvilardell/safe-my-azure-from-claude/issues/15)). In
    that mode the server would run as the same user as Claude Code, so the container boundary would

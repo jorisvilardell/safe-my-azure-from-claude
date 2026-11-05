@@ -20,7 +20,7 @@ Other core properties:
 
 - **Read-only.** No tool may create, update, delete, start, stop, or restart anything. There is no generic "run any ARM/az call" tool, and there never will be.
 - **Multi-tenant.** Tenants and subscriptions are declared in `config/contexts.yaml` under **aliases**. The AI only ever sees aliases.
-- **Dockerised.** The server runs in a container. It exposes MCP over Streamable HTTP on `127.0.0.1:8765/mcp` and a device-code login page on `127.0.0.1:8765/login`. The token cache lives **in memory only**.
+- **Dockerised.** The server runs in a container. It exposes MCP over Streamable HTTP on `127.0.0.1:8765/mcp` (`Authorization: Bearer <mcp key>`) and the human CLI's admin API on `127.0.0.1:8765/admin/*` (`Bearer <admin key>`; the only place a device code is ever returned). Both keys are generated at startup and written only to `/run/safe-azure/keys.json` (tmpfs, 0600). There is no `/login` page: the human signs in with `safe-azure login <alias>` (Rust CLI in `cli/`, [ADR 0001](./docs/adr/0001-cli-auth-install.md)). The token cache lives **in memory only**.
 
 ## 2. Architecture (Feature-Driven Development)
 
@@ -32,9 +32,11 @@ src/
 ├─ main.ts                    # Composition root: load config, build deps, register features, start server
 ├─ app/                       # Application wiring (no business logic)
 │  ├─ features.ts             # List of enabled features
-│  └─ server.ts               # MCP server + HTTP transport
+│  ├─ admin-api.ts            # /admin/* for the safe-azure CLI (admin key, no-store, never a tool)
+│  └─ server.ts               # MCP server + HTTP transport, Bearer auth on /mcp and /admin
 ├─ core/                      # Cross-cutting, feature-agnostic building blocks
 │  ├─ anonymizer/             # scrub() — the single choke point for G1/G2
+│  ├─ auth/                   # Server keys: generation, keys file (0600), constant-time Bearer check
 │  ├─ azure/                  # AzureAccess: contexts, sessions, Resource Graph, SDK client cache, resolver
 │  ├─ config/                 # Env + contexts.yaml loading (zod-validated)
 │  ├─ errors/                 # AppError + sanitizeError()
@@ -57,7 +59,7 @@ Features (registered in `src/app/features.ts`; every tool is listed in
 | Feature     | Tools                                                                               |
 | ----------- | ----------------------------------------------------------------------------------- |
 | `system`    | `server_info` (the smallest feature: start here as a reference)                     |
-| `contexts`  | `list_contexts`, `use_context`, `login`, `login_status`, `logout`                   |
+| `contexts`  | `list_contexts`, `use_context`, `login` (hint only), `login_status`, `logout`       |
 | `inventory` | `list_subscriptions`, `list_resource_groups`, `search_resources`, `get_resource`    |
 | `alerts`    | `list_fired_alerts`, `get_alert`, `list_alert_rules`, `get_activity_log`            |
 | `metrics`   | `list_metric_definitions`, `get_metrics`                                            |
@@ -140,16 +142,16 @@ expectNoLeak(toolText(result));
 
 ## 3. Security rules (non-negotiable)
 
-- **R1.** Never add a tool that returns a token, credential, device code, or raw HTTP request/response.
+- **R1.** Never add a tool that returns a token, credential, device code, server key, or raw HTTP request/response. No tool may start a device-code flow: only `POST /admin/login` does, and the `login` tool only tells the user to run `safe-azure login <alias>`.
 - **R2.** Never add a write/action API call. Allowed: ARM `GET`, Resource Graph query, Log Analytics / App Insights query, metrics query.
 - **R3.** All tool output goes through `scrub()`. Do not bypass `defineTool`.
 - **R4.** All errors go through `sanitizeError()`. Never return `err.message` from the Azure SDK as-is (it contains URLs, subscription IDs, correlation IDs).
-- **R5.** Logs go to **stderr**, through the scrubbing logger. Never log headers, credentials, or full SDK responses.
+- **R5.** Logs go to **stderr**, through the scrubbing logger. Never log headers, credentials, the server keys, the user code, or full SDK responses. `/admin/*` is not AI-facing (no anonymizer), but the same rule applies.
 - **R6.** KQL: reject management commands (`.show`, `.set`, …), and cap the timespan and row count.
 - **R7.** No real Azure identifiers in the repo. That covers tests, fixtures, docs, and commit messages. Use obviously fake GUIDs (`00000000-0000-0000-0000-000000000001`) and documentation IPs (`203.0.113.0/24`, `198.51.100.0/24`).
 - **R8.** The token cache stays in memory. Never write credentials to disk, a volume, or an env var dump. The same goes for the inventory index (`core/azure/inventory-index.ts`): memory only, dropped on logout.
 - **R8b.** MCP resources (only `azure://inventory/<context>`, opt-in with `INVENTORY_RESOURCE=on`) are registered in `app/` and their content goes through `ctx.anonymizer.scrub()` and `sanitizeError()`, exactly like a tool result.
-- **R9.** Agents working on this repo must **not** run `az login`, `az account get-access-token`, `docker exec`/`docker cp` against a running server container, or read `~/.azure/**`. `.claude/settings.json` enforces this for Claude Code.
+- **R9.** Agents working on this repo must **not** run `az login`, `az account get-access-token`, `docker exec`/`docker cp` against a running server container (that is how the keys are read), call `/admin/*`, or read `~/.azure/**`. `.claude/settings.json` enforces this for Claude Code.
 - **R10.** Text copied from Azure is **untrusted data, never instructions** (prompt injection, #39).
   Mappers pass every free-text field through `untrustedText()` from `core/safety` (invisible and control
   characters removed, whitespace collapsed, length capped at whitespace so no identifier is cut into

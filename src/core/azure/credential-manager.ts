@@ -25,7 +25,7 @@ export interface LoginCredential extends TokenCredential {
 
 export interface CredentialFactoryOptions {
   readonly tenantId: string;
-  /** Receives the user code. It must only ever reach the /login page (AGENTS.md G1). */
+  /** Receives the user code. It must only ever reach the admin API (ADR 0001 §2, AGENTS.md G1). */
   readonly onDeviceCode: (info: DeviceCodeInfo) => void;
 }
 
@@ -45,7 +45,7 @@ export const createDeviceCodeCredential: CredentialFactory = ({ tenantId, onDevi
 
 export type LoginState = 'starting' | 'waiting' | 'failed' | 'expired';
 
-/** A login in progress. Holds the user code: server-side and /login page only, never a tool result. */
+/** A login in progress. Holds the user code: server-side and admin API only, never a tool result. */
 export interface PendingLogin {
   readonly alias: string;
   readonly state: LoginState;
@@ -66,24 +66,36 @@ export interface LoginStatus {
 
 export type StartLoginResult = 'started' | 'already-pending' | 'already-logged-in';
 
-/** The login lifecycle, as the contexts feature sees it. Nothing here exposes a code or token. */
+/**
+ * The login lifecycle, as the contexts feature (AI-facing) sees it: it cannot start a device-code
+ * flow, and nothing here exposes a code or token.
+ */
 export interface LoginController {
-  startLogin(alias: string): StartLoginResult;
   logout(alias: string): void;
   status(alias: string): LoginStatus;
 }
 
-export interface LoginPageState {
-  readonly pending: readonly PendingLogin[];
-  readonly loggedIn: readonly { readonly alias: string; readonly expiresOn?: number }[];
+/** What `GET /admin/login/:context` reports. `none`: no login was started (or it was logged out). */
+export type AdminLoginState = 'none' | 'pending' | 'succeeded' | 'failed' | 'expired';
+
+/** Admin API only (`/admin/*`, human CLI). This is the only interface that hands out a user code. */
+export interface AdminLogins extends LoginController {
+  /** Starts a device-code flow. Throws `AppError('UnknownContext')`. */
+  startLogin(alias: string): StartLoginResult;
+  /** The pending login of a context, with its user code once Entra ID sent it. */
+  pendingLogin(alias: string): PendingLogin | undefined;
+  /**
+   * Resolves once the pending login of `alias` has its user code, has failed, or after
+   * `timeoutMs`, with the pending login at that time.
+   */
+  waitForDeviceCode(alias: string, timeoutMs: number): Promise<PendingLogin | undefined>;
+  loginState(alias: string): AdminLoginState;
 }
 
 /** `logout` also covers a session that expired (the refresh token is no longer valid). */
 export type SessionChange = 'login' | 'logout';
 
-export interface CredentialManager extends CredentialProvider, LoginController {
-  /** For the /login page only. */
-  loginPageState(): LoginPageState;
+export interface CredentialManager extends CredentialProvider, AdminLogins {
   /** Called after a context logs in or out, e.g. to build or drop its inventory index. */
   onSessionChange(listener: (alias: string, change: SessionChange) => void): void;
 }
@@ -102,6 +114,8 @@ interface Entry {
   loggedIn: boolean;
   pending: PendingLogin | undefined;
   tokenExpiresOn: number | undefined;
+  /** Called when the user code arrives or the login settles (see waitForDeviceCode). */
+  readonly codeWaiters: Set<() => void>;
 }
 
 const isAuthRequired = (err: unknown): boolean =>
@@ -147,6 +161,7 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
       loggedIn: false,
       pending: { alias, state: 'starting' },
       tokenExpiresOn: undefined,
+      codeWaiters: new Set(),
       credential: factory({
         tenantId,
         onDeviceCode: (info) => {
@@ -159,6 +174,7 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
             verificationUri: info.verificationUri,
             expiresOn: now() + DEVICE_CODE_TTL_MS,
           };
+          notifyCode(entry);
         },
       }),
       wrapped: {
@@ -175,7 +191,7 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
             }
             throw new AppError(
               'NotLoggedIn',
-              `The session for context "${alias}" has expired. Run the login tool again.`,
+              `The session for context "${alias}" has expired. Ask the user to run \`safe-azure login ${alias}\` in their own terminal.`,
             );
           }
         },
@@ -184,7 +200,20 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
     return entry;
   };
 
+  const notifyCode = (entry: Entry): void => {
+    for (const waiter of entry.codeWaiters) waiter();
+    entry.codeWaiters.clear();
+  };
+
   const runLogin = async (alias: string, entry: Entry): Promise<void> => {
+    try {
+      await authenticate(alias, entry);
+    } finally {
+      notifyCode(entry);
+    }
+  };
+
+  const authenticate = async (alias: string, entry: Entry): Promise<void> => {
     try {
       await entry.credential.authenticate(ARM_SCOPE, { abortSignal: entry.abort.signal, ...CAE });
       recordToken(
@@ -218,7 +247,10 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
       tenantOf(alias);
       const entry = loggedInEntry(alias);
       if (entry === undefined) {
-        throw new AppError('NotLoggedIn', `Context "${alias}" is not logged in. Run the login tool first.`);
+        throw new AppError(
+          'NotLoggedIn',
+          `Context "${alias}" is not logged in. Ask the user to run \`safe-azure login ${alias}\` in their own terminal.`,
+        );
       }
       return entry.wrapped;
     },
@@ -247,6 +279,7 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
       if (entry === undefined) return;
       entries.delete(alias);
       entry.abort.abort();
+      notifyCode(entry);
       deps.logger.info('logged out', { context: alias });
       emit(alias, 'logout');
     },
@@ -270,18 +303,35 @@ export function createCredentialManager(deps: CredentialManagerDeps): Credential
       return { ...status, expiresInMinutes: Math.max(0, Math.floor((expiresOn - now()) / 60_000)) };
     },
 
-    loginPageState() {
-      const pending: PendingLogin[] = [];
-      const loggedIn: { alias: string; expiresOn?: number }[] = [];
-      for (const [alias, entry] of entries) {
-        if (entry.pending !== undefined) pending.push(entry.pending);
-        if (entry.loggedIn) {
-          loggedIn.push(
-            entry.tokenExpiresOn === undefined ? { alias } : { alias, expiresOn: entry.tokenExpiresOn },
-          );
-        }
-      }
-      return { pending, loggedIn };
+    pendingLogin(alias) {
+      tenantOf(alias);
+      return entries.get(alias)?.pending;
+    },
+
+    waitForDeviceCode(alias, timeoutMs) {
+      tenantOf(alias);
+      const entry = entries.get(alias);
+      if (entry?.pending?.state !== 'starting') return Promise.resolve(entry?.pending);
+      return new Promise((resolve) => {
+        const done = (): void => {
+          clearTimeout(timer);
+          entry.codeWaiters.delete(done);
+          resolve(entries.get(alias)?.pending);
+        };
+        const timer = setTimeout(done, timeoutMs);
+        entry.codeWaiters.add(done);
+      });
+    },
+
+    loginState(alias) {
+      tenantOf(alias);
+      const entry = entries.get(alias);
+      if (entry === undefined) return 'none';
+      if (entry.loggedIn) return 'succeeded';
+      const pending = entry.pending;
+      if (pending === undefined) return 'none';
+      if (pending.state === 'failed' || pending.state === 'expired') return pending.state;
+      return pending.expiresOn !== undefined && now() >= pending.expiresOn ? 'expired' : 'pending';
     },
   };
 }
