@@ -67,6 +67,15 @@ let tools: Tool[];
 
 function docker(args: readonly string[]): string {
   const res = spawnSync('docker', args, { encoding: 'utf8' });
+  if (res.error !== undefined) {
+    throw new Error(`docker is not installed or not on PATH (${res.error.message}).`);
+  }
+  if (res.status !== 0 && /error during connect|Cannot connect to the Docker daemon/i.test(res.stderr)) {
+    throw new Error(
+      'The Docker daemon is not reachable: start Docker Desktop (or Docker Engine), then the mock ' +
+        'stack: docker compose -f docker-compose.yml -f docker-compose.mock.yml up -d --build --wait',
+    );
+  }
   if (res.status !== 0) throw new Error(`docker ${args[0] ?? ''} failed: ${res.stderr}`);
   return res.stdout;
 }
@@ -178,7 +187,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await client.close();
+  // beforeAll may have failed before the client existed (no Docker, no mock stack): don't hide
+  // that error behind a TypeError here.
+  await (client as Client | undefined)?.close();
   const slowest = [...calls].sort((a, b) => b.ms - a.ms).slice(0, 5);
   process.stdout.write(
     `e2e-mock (${CHAOS ? 'chaos' : 'mocks'}): ${calls.length} calls, ${calls.filter((c) => c.isError).length} errors. ` +
