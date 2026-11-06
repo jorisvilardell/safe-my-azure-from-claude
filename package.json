@@ -1,6 +1,6 @@
 {
   "name": "safe-my-azure-from-claude",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0",
   "description": "Read-only, anonymising Azure MCP server: lets AI agents investigate Azure incidents without leaking credentials or identifiers.",
   "license": "MIT",
   "private": true,
