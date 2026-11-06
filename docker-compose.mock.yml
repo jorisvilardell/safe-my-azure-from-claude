@@ -34,7 +34,7 @@ services:
       retries: 20
 
   devproxy:
-    image: ghcr.io/dotnet/dev-proxy:3.3.1
+    image: ghcr.io/dotnet/dev-proxy:4.0.0
     container_name: azure-safe-devproxy
     entrypoint: ['/bin/bash', '/config/entrypoint.sh']
     environment:

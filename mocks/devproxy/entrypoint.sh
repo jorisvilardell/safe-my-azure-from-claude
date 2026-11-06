@@ -12,6 +12,12 @@ API=http://127.0.0.1:8897
 mkdir -p "$CERT_DIR"
 rm -f "$PEM" "$PEM.tmp"
 
+# Dev Proxy 4 reads its API bearer token from DEV_PROXY_API_TOKEN (at least 32 characters). Set
+# it here, per run, instead of scraping it from a file or the log. The API never leaves the
+# container's network and the token never leaves this script.
+DEV_PROXY_API_TOKEN=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+export DEV_PROXY_API_TOKEN
+
 /app/devproxy/devproxy \
   --ip-address 0.0.0.0 \
   --api-ip-address 0.0.0.0 \
@@ -20,38 +26,17 @@ rm -f "$PEM" "$PEM.tmp"
 proxy_pid=$!
 trap 'kill "$proxy_pid" 2>/dev/null; pkill -f /app/devproxy/devproxy 2>/dev/null; exit 0' TERM INT
 
-# The Dev Proxy API needs a bearer token (generated per run). Try the token file, the startup
-# banner, then the CLI.
-api_token() {
-  local f
-  f=$(find /home/devproxy /tmp -name 'api-*.token' 2>/dev/null | head -n 1)
-  if [ -n "$f" ]; then
-    tr -d '[:space:]' <"$f"
-    return
-  fi
-  if grep -qE 'API token: [0-9A-Fa-f]{64}' "$LOG" 2>/dev/null; then
-    grep -oE 'API token: [0-9A-Fa-f]{64}' "$LOG" | head -n 1 | cut -d ' ' -f 3
-    return
-  fi
-  /app/devproxy/devproxy api token 2>/dev/null | grep -oE '[0-9A-Fa-f]{64}' | head -n 1
-}
-
+# Export the root the engine signs leaf certificates with, from the API (the in-memory
+# certificate). Never convert rootCert.pfx from disk: with Dev Proxy 4 that file is not
+# guaranteed to be the certificate the engine uses, and trusting the wrong one breaks every TLS
+# handshake (Node: UNABLE_TO_VERIFY_LEAF_SIGNATURE, the server's login then fails with a 502).
 export_cert() {
-  local token
   for _ in $(seq 1 90); do
-    token=$(api_token)
-    if [ -n "$token" ] &&
-      curl -fsS -H "Authorization: Bearer $token" "$API/proxy/rootCertificate?format=crt" -o "$PEM.tmp" 2>/dev/null &&
+    if curl -fsS -H "Authorization: Bearer $DEV_PROXY_API_TOKEN" \
+      "$API/proxy/rootCertificate?format=crt" -o "$PEM.tmp" 2>/dev/null &&
       grep -q 'BEGIN CERTIFICATE' "$PEM.tmp"; then
       chmod 644 "$PEM.tmp" && mv "$PEM.tmp" "$PEM"
       echo "devproxy-entrypoint: root CA exported to $PEM"
-      return 0
-    fi
-    # Fallback for images that ship openssl: convert the PKCS#12 root (empty password).
-    if [ -s "$CERT_DIR/rootCert.pfx" ] && command -v openssl >/dev/null 2>&1 &&
-      openssl pkcs12 -in "$CERT_DIR/rootCert.pfx" -clcerts -nokeys -passin pass: -out "$PEM.tmp" 2>/dev/null; then
-      chmod 644 "$PEM.tmp" && mv "$PEM.tmp" "$PEM"
-      echo "devproxy-entrypoint: root CA converted to $PEM"
       return 0
     fi
     sleep 1
