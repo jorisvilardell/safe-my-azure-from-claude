@@ -42,7 +42,7 @@ A suffix such as `v1.2.3-rc.1` makes a pre-release: GitHub marks it as such, npm
 and the image gets `:1.2.3-rc.1` but not `:latest`.
 
 Check the versions at any time with `node scripts/bump-version.mjs --check` (CI runs it on every
-PR, in the `version-lock` job).
+PR, in the `node` job).
 
 ## What the tag runs
 
@@ -80,7 +80,7 @@ workflows, so a normal tag publishes the image once.
 
 - **Image**: Buildx with the GitHub Actions cache. The scan job writes scope `image-amd64`, the
   publish job reads it and writes `image-multi` (both platforms), and both read the default scope
-  CI's `docker` job fills on `main`. `npm ci` in the `Dockerfile` uses a BuildKit cache mount.
+  CI's `e2e` job fills on `main`. `npm ci` in the `Dockerfile` uses a BuildKit cache mount.
 - **Trivy**: its vulnerability database is cached by `trivy-action`.
 - **CLI binaries**: `cache-builds = true` in `dist-workspace.toml` adds `Swatinem/rust-cache`
   (cargo registry and `target/`, keyed per target) to every `build-local-artifacts` job.

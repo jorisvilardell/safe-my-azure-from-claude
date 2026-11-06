@@ -542,5 +542,5 @@ npm ci; npm run dev
 The proxy and the extra CA only exist in the mock setup. `docker-compose.yml` alone never uses a
 proxy or trusts an extra CA. The mocks are hand-written. **Never commit recorded traffic** (for
 example from Dev Proxy's `MockGeneratorPlugin`): it contains real tenant, subscription and
-resource IDs (AGENTS.md R7). CI runs the same stack in the `e2e-mock` job
+resource IDs (AGENTS.md R7). CI runs the same stack in the `e2e` job
 (`npm run test:e2e-mock`).
