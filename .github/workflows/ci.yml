@@ -12,33 +12,70 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Four runners, all in parallel: node (guards, lint, tests on Node 24 and 26), cli on Linux and
+# Windows, and e2e (image build, smoke test, mocked and chaos suites on one machine).
+#
+# Caches are only saved from main. PR runs restore main's caches but don't save their own, which
+# would evict main's from the 10 GB repository quota and never be reused by another branch.
+
 jobs:
-  check:
-    name: Lint · Typecheck · Test · Build (Node ${{ matrix.node }})
+  node:
+    name: Guards · Lint · Typecheck · Test · Build
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [24, 26]
     steps:
       - uses: actions/checkout@v7
+
+      # Repository guards first: a few seconds, no dependencies, fail before anything is installed.
+      # ADR 0001 §7: the CLI version is the image tag, so package.json and cli/Cargo.toml must agree.
+      - name: package.json and cli/Cargo.toml versions match
+        run: node scripts/bump-version.mjs --check
+      - name: No real Azure identifiers committed
+        run: |
+          # Fake GUIDs must start with 00000000- or be the documented test GUID (AGENTS.md R7).
+          # `-o` checks every GUID on its own: filtering whole lines let a real GUID through when a
+          # fake one sat on the same line.
+          hits=$(git grep -nIoE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' -- . ':!package-lock.json' \
+            | grep -vE ':(00000000-0000-0000-0000-[0-9a-fA-F]{12}|11111111-2222-3333-4444-555555555555)$' || true)
+          if [ -n "$hits" ]; then echo "::error::Possible real Azure identifier committed:"; echo "$hits"; exit 1; fi
+
       - uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
+          node-version: 24
+      # node_modules itself, keyed on the lockfile: a hit skips `npm ci` entirely. The native
+      # dependencies (rolldown, lightningcss) are N-API, so the same tree runs on Node 24 and 26.
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache/restore@v6
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+      - if: steps.node-modules.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: node_modules
+          key: ${{ steps.node-modules.outputs.cache-primary-key }}
+
       - run: npm run lint
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm run test:coverage
       - run: npm run build
       - name: Upload coverage
-        if: matrix.node == 24
         uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage/
           retention-days: 7
+
+      # engines is node >=24 and native Windows mode runs on the user's Node, so the tests also run
+      # on the newest major. Lint, format, typecheck and build don't depend on the Node version.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - name: Test (Node 26)
+        run: npm test
 
   cli:
     name: CLI (Rust, ${{ matrix.os }})
@@ -46,6 +83,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Windows has its own code (DPAPI, paths); Linux covers the Unix code that macOS shares.
+        # Every target, macOS included, is built on release (dist) and in the release dry run.
         os: [windows-latest, ubuntu-latest]
     defaults:
       run:
@@ -55,86 +94,44 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      # Caches ~/.cargo/registry and the compiled dependencies in cli/target, keyed on Cargo.lock,
+      # the toolchain and the OS: the GitHub Actions counterpart of cargo-chef.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: cli
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
-      - run: cargo build --release --locked
-
-  # ADR 0001 §7: the CLI version is the image tag, so package.json and cli/Cargo.toml must agree.
-  version-lock:
-    name: package.json and cli/Cargo.toml versions match
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - run: node scripts/bump-version.mjs --check
-
-  leak-guard:
-    name: No real Azure identifiers committed
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Reject non-fake GUIDs
-        run: |
-          # Fake GUIDs must start with 00000000- or be the documented test GUID (AGENTS.md R7).
-          # `-o` checks every GUID on its own: filtering whole lines let a real GUID through when a
-          # fake one sat on the same line.
-          hits=$(git grep -nIoE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' -- . ':!package-lock.json' \
-            | grep -vE ':(00000000-0000-0000-0000-[0-9a-fA-F]{12}|11111111-2222-3333-4444-555555555555)$' || true)
-          if [ -n "$hits" ]; then echo "::error::Possible real Azure identifier committed:"; echo "$hits"; exit 1; fi
-
-  docker:
-    name: Docker image build
-    runs-on: ubuntu-latest
-    needs: check
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: false
-          load: true
-          tags: safe-my-azure-from-claude:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Smoke test container
-        run: |
-          docker run -d --name smoke -p 127.0.0.1:8765:8765 safe-my-azure-from-claude:ci
-          for i in $(seq 1 20); do curl -fs http://127.0.0.1:8765/healthz && break; sleep 1; done
-          curl -fs http://127.0.0.1:8765/healthz
-          docker rm -f smoke
+      # No `cargo build --release`: the release profile (thin LTO, one codegen unit) is slow, and the
+      # release dry run already builds it with dist on PRs that touch cli/**.
 
   # The real container, end to end, against Azure mocked by Dev Proxy (mocks/devproxy). No tenant.
-  e2e-mock:
-    name: E2E against mocked Azure (${{ matrix.mode }})
+  # One machine: the image is built once, then the mocked and the chaos suites run one after the
+  # other against it.
+  e2e:
+    name: Image · smoke · E2E (mocks, chaos)
     runs-on: ubuntu-latest
-    needs: docker
-    timeout-minutes: 20
-    # Chaos (random 5xx, 429, latency) is informative, not a merge gate: it is random by design.
-    continue-on-error: ${{ matrix.mode == 'chaos' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - mode: mocks
-            devproxy-config: devproxyrc.json
-          - mode: chaos
-            devproxy-config: devproxyrc.chaos.json
+    timeout-minutes: 25
     env:
       COMPOSE: docker compose -f docker-compose.yml -f docker-compose.mock.yml
-      DEVPROXY_CONFIG: ${{ matrix.devproxy-config }}
-      E2E_MOCK_MODE: ${{ matrix.mode }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache/restore@v6
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
       - uses: docker/setup-buildx-action@v4
+      # Layers come from the GitHub Actions cache: with an unchanged package-lock.json, the
+      # `npm ci` layer is reused and only `COPY src` and the TypeScript build run.
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -142,17 +139,57 @@ jobs:
           load: true
           tags: safe-my-azure-from-claude:local
           cache-from: type=gha
-      - name: Start the server and Dev Proxy
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}
+
+      # A plain `docker run`, without compose's tmpfs and hardening: the image must start on its own.
+      - name: Smoke test container
+        run: |
+          docker run -d --name smoke -p 127.0.0.1:8765:8765 safe-my-azure-from-claude:local
+          for i in $(seq 1 20); do curl -fs http://127.0.0.1:8765/healthz && break; sleep 1; done
+          curl -fs http://127.0.0.1:8765/healthz
+          docker rm -f smoke
+
+      - name: 'Mocks: start the server and Dev Proxy'
+        env:
+          DEVPROXY_CONFIG: devproxyrc.json
         run: $COMPOSE up -d --no-build --wait --wait-timeout 180
-      - name: Run the e2e-mock suite
+      - name: 'Mocks: run the e2e-mock suite'
+        env:
+          E2E_MOCK_MODE: mocks
         run: npm run test:e2e-mock
-      - name: Dump logs on failure
+      - name: 'Mocks: dump logs on failure'
         if: failure()
         # The server logs through its scrubber, and the proxy only ever saw the fake IDs of the mocks.
         run: |
           $COMPOSE ps -a
           $COMPOSE logs --no-color --timestamps devproxy | tail -n 400
           $COMPOSE logs --no-color --timestamps azure-safe-mcp | tail -n 200
+
+      # Chaos (random 5xx, 429, latency) is informative, not a merge gate: it is random by design.
+      # A failure shows as a warning on the step, and the job stays green.
+      - name: 'Chaos: restart Dev Proxy with the chaos preset'
+        id: chaos-up
+        continue-on-error: true
+        env:
+          DEVPROXY_CONFIG: devproxyrc.chaos.json
+        run: |
+          $COMPOSE down -v
+          $COMPOSE up -d --no-build --wait --wait-timeout 180
+      - name: 'Chaos: run the e2e-mock suite'
+        id: chaos
+        if: steps.chaos-up.outcome == 'success'
+        continue-on-error: true
+        env:
+          E2E_MOCK_MODE: chaos
+        run: npm run test:e2e-mock
+      - name: 'Chaos: report'
+        if: steps.chaos-up.outcome == 'failure' || steps.chaos.outcome == 'failure'
+        run: |
+          echo "::warning::The chaos suite failed (not a merge gate). Logs follow."
+          $COMPOSE ps -a
+          $COMPOSE logs --no-color --timestamps devproxy | tail -n 400
+          $COMPOSE logs --no-color --timestamps azure-safe-mcp | tail -n 200
+
       - name: Stop
         if: always()
         run: $COMPOSE down -v

@@ -174,7 +174,7 @@ error prints a fixed message only.
 - Every feature's tests run its tools through `executeTool` with fake payloads full of GUIDs, ARM
   IDs, emails, JWTs and public IPs, and assert that none of them come out (`expectNoLeak()`).
 - An e2e test drives the real HTTP server over MCP.
-- The CI `leak-guard` job rejects any GUID in the repository that is not obviously fake
+- The CI `node` job (step "No real Azure identifiers committed") rejects any GUID in the repository that is not obviously fake
   (`00000000-0000-0000-0000-…`). Docs and fixtures use documentation IPs
   (`203.0.113.0/24`, `198.51.100.0/24`).
 
@@ -306,7 +306,7 @@ Why this design:
   - _In CI, statically._ `test/read-only/` walks `src/` with the TypeScript compiler and fails on a
     write-like or unknown method called on an Azure SDK object, on an SDK client constructed outside
     the factory, and on raw `fetch` / `http(s).request` / `undici`. It has a self-test on bad fixtures.
-  - _In CI, end to end._ The e2e-mock job checks that every request Dev Proxy intercepted for
+  - _In CI, end to end._ The `e2e` job checks that every request Dev Proxy intercepted for
     `management.azure.com` or `api.loganalytics.io` is a `GET` or an allowlisted POST.
 - KQL is checked before it is sent (`core/safety/kql-guard.ts`): management commands (`.show`,
   `.set`, …), `set` and other non-query statements, cross-scope and external functions
