@@ -9,6 +9,7 @@ on:
       - 'Dockerfile'
       - 'dist-workspace.toml'
       - 'scripts/bump-version.mjs'
+      - 'scripts/patch-release-workflow.mjs'
       - '.github/workflows/release*.yml'
 
 permissions:
@@ -20,6 +21,8 @@ concurrency:
 
 env:
   DIST_VERSION: 0.34.0
+  # Never pushed: only checks that a tag sets the version of what is built.
+  TEST_TAG: v9.9.9-rc.1
 
 jobs:
   release-dry-run:
@@ -38,14 +41,31 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: cli
-      # Also fails if release.yml is not what `dist generate` would write.
-      - run: dist plan
+      # release.yml = `dist generate` + scripts/patch-release-workflow.mjs. allow-dirty = ["ci"]
+      # makes dist skip the file, so regenerate without it and compare.
+      - name: release.yml is current
+        run: |
+          cp dist-workspace.toml "$RUNNER_TEMP/dist-workspace.toml"
+          sed -i '/^allow-dirty = ["ci"]$/d' dist-workspace.toml
+          dist generate
+          cp "$RUNNER_TEMP/dist-workspace.toml" dist-workspace.toml
+          node scripts/patch-release-workflow.mjs
+          git diff --exit-code .github/workflows/release.yml || {
+            echo "::error::release.yml is stale: run dist generate (without allow-dirty) and node scripts/patch-release-workflow.mjs"
+            exit 1
+          }
+      # What a tag does: the version comes from the tag, whatever the files say.
+      - name: Version from a test tag
+        run: node scripts/bump-version.mjs "${TEST_TAG#v}"
+      - run: dist plan --tag="$TEST_TAG"
       - name: Build binary, updater and installers
-        run: dist build --artifacts=all --target=x86_64-unknown-linux-musl
+        run: dist build --tag="$TEST_TAG" --artifacts=all --target=x86_64-unknown-linux-musl
       - name: Smoke test the binary
         run: |
           tar -xJf target/distrib/safe-azure-x86_64-unknown-linux-musl.tar.xz -C "$RUNNER_TEMP"
-          "$RUNNER_TEMP/safe-azure-x86_64-unknown-linux-musl/safe-azure" --version
+          version=$("$RUNNER_TEMP/safe-azure-x86_64-unknown-linux-musl/safe-azure" --version)
+          echo "$version"
+          case "$version" in *"${TEST_TAG#v}"*) ;; *) echo "::error::expected ${TEST_TAG#v}, got: $version"; exit 1 ;; esac
           ls -l target/distrib
 
   release-dry-run-image:

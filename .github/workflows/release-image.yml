@@ -143,10 +143,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # Runs in parallel with release-version-check, so it guards its own push.
-      - name: Tag matches package.json and cli/Cargo.toml
-        if: env.PUSH == 'true'
-        run: node scripts/bump-version.mjs --check "${{ github.ref_name }}"
+      # The tag is the version: the image's package.json says X.Y.Z, like the CLI that pulls it.
+      - name: Version from the tag
+        if: github.ref_type == 'tag'
+        run: node scripts/bump-version.mjs "${{ github.ref_name }}"
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR

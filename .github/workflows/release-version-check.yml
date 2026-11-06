@@ -1,5 +1,7 @@
-# Version lock (ADR 0001 §7), at release time. Called by release.yml (dist `plan-jobs`) on a tag:
-# no binary is built unless the tag is exactly v<package.json version> = v<cli/Cargo.toml version>.
+# Tag format, at release time. Called by release.yml (dist `plan-jobs`) on a tag: nothing is built
+# unless the tag is vX.Y.Z or vX.Y.Z-(alpha|beta|rc).N. The tag is the release version: every job
+# that builds writes it into the version files first (scripts/patch-release-workflow.mjs), so the
+# files on the tagged commit don't have to match (an rc and its final release share one commit).
 name: Release version check
 
 on:
@@ -15,13 +17,13 @@ permissions:
 
 jobs:
   version:
-    name: Tag matches package.json and cli/Cargo.toml
+    name: Release tag format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Check the tag
+      - name: Check the tag format
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -29,4 +31,5 @@ jobs:
             echo "::error::Releases are cut from tags like v1.2.3 or v1.2.3-rc.1 (alpha, beta, rc), got '$TAG'."
             exit 1
           fi
-          node scripts/bump-version.mjs --check "$TAG"
+          # The script accepts it too (it writes it into the version files in the build jobs).
+          node scripts/bump-version.mjs "$TAG" >/dev/null
