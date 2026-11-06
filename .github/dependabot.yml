@@ -24,3 +24,9 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
+  # Compose images: the Dev Proxy image of the mock stack (docker-compose.mock.yml). The $schema
+  # URLs in mocks/devproxy must follow it; test/mocks/devproxy-schemas.test.ts fails the PR until
+  # they do: sed -i 's|schemas/vOLD/|schemas/vNEW/|' mocks/devproxy/*.json mocks/devproxy/*/*.json
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule: { interval: weekly }
