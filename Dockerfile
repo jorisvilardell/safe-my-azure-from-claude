@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- build ----
-FROM node:24-alpine AS build
+FROM node:25-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 # --omit=optional: @azure/identity-broker (native Windows WAM, AUTH_MODE=broker) is not for the image.
@@ -11,7 +11,7 @@ COPY src ./src
 RUN npm run build && npm prune --omit=dev --omit=optional
 
 # ---- runtime ----
-FROM node:24-alpine AS runtime
+FROM node:25-alpine AS runtime
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8765 \
