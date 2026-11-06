@@ -26,6 +26,9 @@ targets = [
 install-updater = true
 # Swatinem/rust-cache in every build job (target/ and the cargo registry), keyed per target.
 cache-builds = true
+# release.yml is patched after `dist generate` (scripts/patch-release-workflow.mjs): the version
+# files are set from the tag in every dist job. The release dry run checks the patch is current.
+allow-dirty = ["ci"]
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # The npm package is `safe-azure`, so `npx safe-azure` works (needs the NPM_TOKEN secret)

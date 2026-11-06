@@ -59,6 +59,14 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+      # Patched by scripts/patch-release-workflow.mjs: the tag is the version (vX.Y.Z -> X.Y.Z).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Version from the tag
+        if: ${{ github.ref_type == 'tag' }}
+        shell: bash
+        run: node scripts/bump-version.mjs "${GITHUB_REF_NAME#v}"
       - name: Install dist
         # we specify bash to get pipefail; it guards against the `curl` command
         # failing. otherwise `sh` won't catch that `curl` returned non-0
@@ -135,6 +143,14 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+      # Patched by scripts/patch-release-workflow.mjs: the tag is the version (vX.Y.Z -> X.Y.Z).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Version from the tag
+        if: ${{ github.ref_type == 'tag' }}
+        shell: bash
+        run: node scripts/bump-version.mjs "${GITHUB_REF_NAME#v}"
       - name: Install Rust non-interactively if not already installed
         if: ${{ matrix.container }}
         run: |
@@ -198,6 +214,14 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+      # Patched by scripts/patch-release-workflow.mjs: the tag is the version (vX.Y.Z -> X.Y.Z).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Version from the tag
+        if: ${{ github.ref_type == 'tag' }}
+        shell: bash
+        run: node scripts/bump-version.mjs "${GITHUB_REF_NAME#v}"
       - name: Install cached dist
         uses: actions/download-artifact@v8
         with:
@@ -248,6 +272,14 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+      # Patched by scripts/patch-release-workflow.mjs: the tag is the version (vX.Y.Z -> X.Y.Z).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Version from the tag
+        if: ${{ github.ref_type == 'tag' }}
+        shell: bash
+        run: node scripts/bump-version.mjs "${GITHUB_REF_NAME#v}"
       - name: Install cached dist
         uses: actions/download-artifact@v8
         with:
