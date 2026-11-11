@@ -30,7 +30,7 @@
     "@azure/arm-resourcegraph": "^5.0.0",
     "@azure/arm-resourcehealth": "^5.0.0",
     "@azure/core-auth": "^1.11.0",
-    "@azure/core-rest-pipeline": "^1.25.0",
+    "@azure/core-rest-pipeline": "^1.25.1",
     "@azure/identity": "^4.14.1",
     "@azure/logger": "^1.4.0",
     "@azure/monitor-query-logs": "^1.0.0",
